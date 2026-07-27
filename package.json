@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "start": "node prod-server.mjs",
     "check": "npm run build"
   },
   "dependencies": {

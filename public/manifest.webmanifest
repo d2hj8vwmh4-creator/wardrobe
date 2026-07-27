@@ -1,13 +1,15 @@
 {
-  "name": "Open Wardrobe",
-  "short_name": "Wardrobe",
-  "description": "A local-first AI wardrobe gallery.",
+  "name": "电子衣橱",
+  "short_name": "电子衣橱",
+  "description": "本地优先的 AI 电子衣橱相册。",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f4f0e8",
   "theme_color": "#f4f0e8",
   "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

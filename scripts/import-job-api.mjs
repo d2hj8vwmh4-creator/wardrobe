@@ -6,9 +6,10 @@ import sharp from "sharp";
 const API_ROOT = "/api/import/jobs";
 const ASSET_ROOT = "/api/import/assets";
 const LIBRARY_ASSET_ROOT = "/api/import/library";
+const OUTFIT_ASSET_ROOT = "/api/import/outfits";
 const STAGES = new Set(["crop", "garment", "modeled"]);
 const DECISIONS = new Set(["approve", "reject"]);
-const PARTS = new Set(["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
+const PARTS = new Set(["upperbody", "wholebody_up", "lowerbody", "accessories_up", "necklace", "bag", "shoes"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 function json(res, status, value) {
@@ -16,6 +17,31 @@ function json(res, status, value) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
   res.end(JSON.stringify(value));
+}
+
+// 运行时设置覆盖层：data/settings.json 优先于 .env；用户在前端设置模块修改后落盘
+const SETTINGS_FILE = "settings.json";
+async function loadRuntimeSettings(dataDir) {
+  try {
+    const raw = await readFile(path.join(dataDir, SETTINGS_FILE), "utf8");
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" ? obj : {};
+  } catch (error) {
+    if (error.code === "ENOENT") return {};
+    throw error;
+  }
+}
+async function saveRuntimeSettings(dataDir, obj) {
+  await writeFile(path.join(dataDir, SETTINGS_FILE), JSON.stringify(obj, null, 2), "utf8");
+}
+
+const DETECTION_PROMPT = "Identify every distinct wearable clothing item visible in this image. A photo may show one isolated garment or a person wearing several items. Return one record per actual item that should enter a wardrobe. Ignore the person's body and non-wearable background objects. For each item, include a tight bounding box around only that item using integer coordinates normalized to a 1000 by 1000 image: x and y are the top-left corner, followed by width and height. Boxes may overlap when garments overlap, but each box must focus on one distinct item. Use only these category ids: upperbody, wholebody_up, lowerbody, accessories_up, necklace, bag, shoes (其中 accessories_up 指帽子/围巾等头颈配饰，necklace 指项链，bag 指包包). Suggest a concise specific name written in Simplified Chinese (简体中文), primary hex color, optional genuinely distinct secondary hex color, and 1-4 useful lowercase detail tags (also in Simplified Chinese, e.g. 镂空、宽松、长袖).";
+
+// 搭配（多件合成）提示词：Image 1 为本人参考照，Image 2..N 为各衣物切图，要求一次性组合成完整穿搭上身图
+function buildOutfitPrompt(count, custom) {
+  const last = count + 1;
+  const base = `Create a professional horizontal 3:2 editorial fashion photograph of the person in Image 1 wearing ALL the garments shown in the following images (Image 2 through Image ${last}). Combine them into one coherent, natural outfit: place each garment on its correct body region — tops and outerwear on the torso, bottoms on the legs, footwear on the feet, accessories in their usual position. Preserve the person's recognizable identity, face, hair, age and proportions. Preserve every garment's color, material, fit, construction, graphic, logo and distinctive detail. Keep each featured item clearly visible and unobstructed. Use realistic anatomy, natural light, authentic fabric, a tasteful real-world setting, and leave environmental space around the model. No text, watermark, product mockup, or synthetic appearance.`;
+  return custom ? `${base}\nAdditional styling direction: ${custom}` : base;
 }
 
 async function body(req, limit = 25 * 1024 * 1024) {
@@ -325,10 +351,10 @@ async function openAIAnalyze({ key, baseUrl, model, image, mime }) {
     body: JSON.stringify({
       model,
       input: [{ role: "user", content: [
-        { type: "input_text", text: "Identify every distinct wearable clothing item visible in this image. A photo may show one isolated garment or a person wearing several items. Return one record per actual item that should enter a wardrobe. Ignore the person's body and non-wearable background objects. For each item, include a tight bounding box around only that item using integer coordinates normalized to a 1000 by 1000 image: x and y are the top-left corner, followed by width and height. Boxes may overlap when garments overlap, but each box must focus on one distinct item. Use only these category ids: upperbody, wholebody_up, lowerbody, accessories_up, shoes. Suggest a concise specific name, primary hex color, optional genuinely distinct secondary hex color, and 1-4 useful lowercase detail tags." },
+        { type: "input_text", text: DETECTION_PROMPT },
         { type: "input_image", image_url: `data:${mime};base64,${image.toString("base64")}` },
       ] }],
-      text: { format: { type: "json_schema", name: "wardrobe_items", strict: true, schema: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 0, maxItems: 8, items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, part: { type: "string", enum: ["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"] }, color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, secondaryColor: { anyOf: [{ type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, { type: "null" }] }, tags: { type: "array", items: { type: "string" }, maxItems: 4 }, boundingBox: { type: "object", additionalProperties: false, properties: { x: { type: "integer", minimum: 0, maximum: 999 }, y: { type: "integer", minimum: 0, maximum: 999 }, width: { type: "integer", minimum: 1, maximum: 1000 }, height: { type: "integer", minimum: 1, maximum: 1000 } }, required: ["x", "y", "width", "height"] } }, required: ["name", "part", "color", "secondaryColor", "tags", "boundingBox"] } } }, required: ["items"] } } },
+      text: { format: { type: "json_schema", name: "wardrobe_items", strict: true, schema: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 0, maxItems: 8, items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, part: { type: "string", enum: ["upperbody", "wholebody_up", "lowerbody", "accessories_up", "necklace", "bag", "shoes"] }, color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, secondaryColor: { anyOf: [{ type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, { type: "null" }] }, tags: { type: "array", items: { type: "string" }, maxItems: 4 }, boundingBox: { type: "object", additionalProperties: false, properties: { x: { type: "integer", minimum: 0, maximum: 999 }, y: { type: "integer", minimum: 0, maximum: 999 }, width: { type: "integer", minimum: 1, maximum: 1000 }, height: { type: "integer", minimum: 1, maximum: 1000 } }, required: ["x", "y", "width", "height"] } }, required: ["name", "part", "color", "secondaryColor", "tags", "boundingBox"] } } }, required: ["items"] } } },
     }),
   });
   const result = await response.json().catch(() => ({}));
@@ -342,12 +368,131 @@ async function openAIAnalyze({ key, baseUrl, model, image, mime }) {
 
 export function wardrobeImportApi(options = {}) {
   let root;
+  let dataDir;
   let jobsDir;
   let importedFile;
   let libraryAssetDir;
+  let outfitDir;
   const running = new Map();
-  const setting = (name, fallback = "") => options.env?.[name] || process.env[name] || fallback;
+  let runtimeSettings = {};
+  const setting = (name, fallback = "") => (name in runtimeSettings ? runtimeSettings[name] : (options.env?.[name] || process.env[name] || fallback));
   const apiBaseUrl = () => setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/$/, "");
+  const provider = (setting("WARDROBE_AI_PROVIDER", "openai") || "openai").toLowerCase();
+  const qwenImageBase = () => setting("QWEN_IMAGE_BASE_URL", "https://dashscope.aliyuncs.com").replace(/\/$/, "");
+  const visionModel = () => provider === "qwen" ? setting("OPENAI_VISION_MODEL", "qwen3-vl-plus") : setting("OPENAI_VISION_MODEL", "gpt-5.4-mini");
+  const imageModel = () => provider === "qwen" ? setting("OPENAI_IMAGE_MODEL", "wan2.7-image") : setting("OPENAI_IMAGE_MODEL", "gpt-image-2");
+
+  function extractJson(text) {
+    if (typeof text !== "string") throw new Error("Empty AI analysis text");
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const raw = fenced ? fenced[1] : text;
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) throw new Error("AI analysis did not contain JSON");
+    return raw.slice(start, end + 1);
+  }
+
+  async function flattenForQwen(buffer) {
+    // DashScope image APIs reject PNG alpha channels; flatten onto white first.
+    return sharp(buffer).flatten({ background: { r: 255, g: 255, b: 255 } }).png().toBuffer();
+  }
+
+  async function qwenAnalyze({ key, baseUrl, model, image, mime }) {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: [
+          { type: "text", text: `${DETECTION_PROMPT}\n\nRespond with ONLY a JSON object of the form {"items":[{"name","part","color","secondaryColor","tags","boundingBox"}]}. No markdown, no prose.` },
+          { type: "image_url", image_url: { url: `data:${mime};base64,${image.toString("base64")}` } },
+        ] }],
+        response_format: { type: "json_object" },
+        temperature: 0.2,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error?.message || `Qwen analysis failed (${response.status})`);
+    const text = result.choices?.[0]?.message?.content;
+    if (!text) throw new Error("Qwen analysis returned no content");
+    const parsed = JSON.parse(extractJson(text));
+    if (!Array.isArray(parsed.items)) throw new Error("Qwen analysis returned an invalid clothing list");
+    return parsed.items;
+  }
+
+  async function pollQwenTask(key, taskId, timeoutMs = 240000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const res = await fetch(`${qwenImageBase()}/api/v1/tasks/${taskId}`, { headers: { Authorization: `Bearer ${key}` } });
+      const json = await res.json().catch(() => ({}));
+      const status = json.output?.task_status;
+      if (status === "SUCCEEDED") {
+        // wan2.6/2.7 异步任务结果在 output.choices[0].message.content[0].image（chat-completions 风格）；
+        // 老 wanx image-synthesis 才会用 output.results[0].url。新结构兜底老结构以防 API 兼容旧版。
+        const url = json.output?.choices?.[0]?.message?.content?.find?.((part) => typeof part?.image === "string")?.image
+          || json.output?.results?.[0]?.url;
+        if (!url) throw new Error("Qwen image task succeeded but returned no result url");
+        return url;
+      }
+      if (status === "FAILED") throw new Error(`Qwen image task failed: ${json.output?.message || json.output?.code || "unknown error"}`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    throw new Error("Qwen image task timed out");
+  }
+
+  async function qwenImageEdit({ key, baseUrl, model, prompt, images, size }) {
+    // qwen-image-2.0 / qwen-image-edit 系列走 multimodal-generation 同步端点（Base64 直接传图、同步返回）；
+    // wan2.x 系列走 image-generation 异步 task 端点（X-DashScope-Async + 轮询）。
+    // 两者图片元素格式一致：{ image: "data:..." }。
+    const isMultimodal = /^qwen-image/i.test(model);
+    const content = [{ text: prompt }];
+    for (const image of images) {
+      const flat = await flattenForQwen(image.data);
+      content.push({ image: `data:${image.mime};base64,${flat.toString("base64")}` });
+    }
+    if (isMultimodal) {
+      const res = await fetch(`${baseUrl}/api/v1/services/aigc/multimodal-generation/generation`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          input: { messages: [{ role: "user", content }] },
+          parameters: { size: String(size).replace("x", "*"), n: 1, prompt_extend: false, watermark: false, negative_prompt: " " },
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || json.output?.message || `Qwen image failed (${res.status})`);
+      const imgs = (json.output?.choices?.[0]?.message?.content || [])
+        .filter((part) => typeof part?.image === "string")
+        .map((part) => part.image);
+      if (!imgs.length) throw new Error("Qwen image returned no result url");
+      const imgRes = await fetch(imgs[0]);
+      if (!imgRes.ok) throw new Error("Failed to download Qwen generated image");
+      return Buffer.from(await imgRes.arrayBuffer());
+    }
+    const createRes = await fetch(`${baseUrl}/api/v1/services/aigc/image-generation/generation`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-DashScope-Async": "enable" },
+      body: JSON.stringify({
+        model,
+        input: { messages: [{ role: "user", content }] },
+        parameters: { size: String(size).replace("x", "*"), n: 1 },
+      }),
+    });
+    const createJson = await createRes.json().catch(() => ({}));
+    if (!createRes.ok) throw new Error(createJson.message || createJson.output?.message || `Qwen image task failed (${createRes.status})`);
+    const taskId = createJson.output?.task_id;
+    if (!taskId) throw new Error("Qwen image task did not return a task_id");
+    const resultUrl = await pollQwenTask(key, taskId);
+    const imgRes = await fetch(resultUrl);
+    if (!imgRes.ok) throw new Error("Failed to download Qwen generated image");
+    return Buffer.from(await imgRes.arrayBuffer());
+  }
+
+  async function callImageEdit({ key, model, prompt, images, size }) {
+    if (provider === "qwen") return qwenImageEdit({ key, baseUrl: qwenImageBase(), model, prompt, images, size });
+    return openAIEdit({ key, baseUrl: apiBaseUrl(), model, prompt, images, size, quality: setting("OPENAI_IMAGE_QUALITY", "high") });
+  }
 
   async function setupStatus() {
     const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
@@ -364,6 +509,27 @@ export function wardrobeImportApi(options = {}) {
       hasApiKey,
       hasModelReference,
       modelReference: referenceSetting,
+    };
+  }
+
+  // 对外暴露的可编辑设置（apiKey 脱敏显示）
+  function publicSettings() {
+    const maskKey = (value) => {
+      if (!value) return null;
+      const text = String(value);
+      return text.length > 8 ? `${text.slice(0, 4)}…${text.slice(-4)}` : "••••";
+    };
+    return {
+      provider: setting("WARDROBE_AI_PROVIDER", "openai"),
+      visionModel: setting("OPENAI_VISION_MODEL", ""),
+      imageModel: setting("OPENAI_IMAGE_MODEL", ""),
+      garmentModel: setting("OPENAI_GARMENT_MODEL", ""),
+      imageQuality: setting("OPENAI_IMAGE_QUALITY", "high"),
+      visionBaseUrl: setting("OPENAI_API_BASE_URL", ""),
+      imageBaseUrl: setting("QWEN_IMAGE_BASE_URL", ""),
+      apiKey: maskKey(setting("OPENAI_API_KEY", "")),
+      hasApiKey: Boolean(setting("OPENAI_API_KEY").trim()),
+      modelReference: setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png"),
     };
   }
 
@@ -442,28 +608,23 @@ export function wardrobeImportApi(options = {}) {
         if (stageName === "garment") {
           chromaKeyUsed = chooseChromaKey(current.metadata.color);
           const basePrompt = options.garmentPrompt || buildGarmentPrompt(current.metadata, chromaKeyUsed);
-          bytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_GARMENT_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1024x1024", images: [original], prompt: current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt });
+          bytes = await callImageEdit({ key, model: setting("OPENAI_GARMENT_MODEL", imageModel()), prompt: current.stages.garment.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.garment.prompt}` : basePrompt, images: [original], size: "1024x1024" });
           const rawName = `${stageName}-${stage.attempts}-source.png`;
           await writeFile(path.join(dir, rawName), bytes);
           failedAssetUrl = `${ASSET_ROOT}/${current.id}/${rawName}`;
-          bytes = await removeChromaBackground(bytes, chromaKeyUsed);
+          bytes = await removeChromaBackground(bytes, chromaKeyUsed, provider === "qwen" ? { strict: false } : {});
         } else {
           const garmentName = current.stages.garment.assetUrl
             ? path.basename(new URL(current.stages.garment.assetUrl, "http://localhost").pathname)
             : `garment-${current.stages.garment.attempts}.png`;
           const garmentFile = path.join(dir, garmentName);
           const garment = { data: await readFile(garmentFile), mime: "image/png", name: "garment.png" };
-          const modelPath = path.resolve(root, setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png"));
-          let modelData;
-          try {
-            modelData = await readFile(modelPath);
-          } catch (error) {
-            if (error.code === "ENOENT") throw new Error(`Model reference not found at ${modelPath}. Set WARDROBE_MODEL_REFERENCE or add data/model-reference.png.`);
-            throw error;
-          }
+          // 参考人像改用用户上传的原始照片（job 的 originalFile），而非固定的 model-reference.png
+          // 这样上身图严格基于用户本次上传的图片，不会自行生成不相关的人像
+          const modelData = await sharp(path.join(dir, current.internal.originalFile)).resize(1280, null, { withoutEnlargement: true }).png().toBuffer();
           const model = { data: modelData, mime: "image/png", name: "model.png" };
           const basePrompt = options.modeledPrompt || "Create a professional horizontal 3:2 editorial fashion photograph of the person in Image 1 wearing the exact garment from Image 2. Preserve the person's recognizable identity, face, hair, age and proportions. Preserve every garment color, material, fit, construction, graphic, logo and distinctive detail. Keep the complete featured item clearly visible and unobstructed, use understated neutral supporting clothes, realistic anatomy, natural light, authentic fabric, a tasteful real-world setting, and leave environmental space around the model. No text, watermark, product mockup, or synthetic appearance.";
-          bytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [model, garment], prompt: current.stages.modeled.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.modeled.prompt}` : basePrompt });
+          bytes = await callImageEdit({ key, model: setting("OPENAI_MODELED_MODEL", imageModel()), prompt: current.stages.modeled.prompt ? `${basePrompt}\nUser regeneration direction: ${current.stages.modeled.prompt}` : basePrompt, images: [model, garment], size: "1536x1024" });
         }
         await writeFile(output, bytes);
         const fresh = await loadJob(current.id);
@@ -477,6 +638,11 @@ export function wardrobeImportApi(options = {}) {
         await saveJob(fresh);
       } catch (error) {
         const fresh = await loadJob(current.id);
+        if (!fresh) {
+          // job 在生成过程中被删除/清理，避免 null deref 崩溃整个 Node 进程
+          console.error(`[generate] job ${current.id} disappeared during ${stageName} generation:`, error.message);
+          return;
+        }
         fresh.stages[stageName].status = "failed"; fresh.stages[stageName].error = error.message; fresh.stages[stageName].updatedAt = new Date().toISOString();
         if (typeof failedAssetUrl === "string") fresh.stages[stageName].failedAssetUrl = failedAssetUrl;
         if (chromaKeyUsed) fresh.stages[stageName].chromaKey = chromaKeyUsed;
@@ -496,6 +662,84 @@ export function wardrobeImportApi(options = {}) {
       }
       if (url.pathname === "/api/import/config" && req.method === "GET") {
         return json(res, 200, await setupStatus());
+      }
+      // 设置模块：运行时覆盖层（data/settings.json）的读写接口
+      if (url.pathname === "/api/import/settings" && req.method === "GET") {
+        return json(res, 200, publicSettings());
+      }
+      if (url.pathname === "/api/import/settings" && req.method === "POST") {
+        const input = await body(req);
+        if (input.reset === true) {
+          runtimeSettings = {};
+          await saveRuntimeSettings(dataDir, runtimeSettings);
+          return json(res, 200, publicSettings());
+        }
+        const next = { ...runtimeSettings };
+        const allowedProviders = new Set(["openai", "qwen"]);
+        const allowedQualities = new Set(["low", "medium", "high", "auto", "standard"]);
+        if (input.provider !== undefined) {
+          if (typeof input.provider !== "string" || !allowedProviders.has(input.provider)) {
+            return json(res, 400, { error: `provider 必须是 ${[...allowedProviders].join(" / ")} 之一` });
+          }
+          next.WARDROBE_AI_PROVIDER = input.provider;
+        }
+        for (const [field, envName] of [
+          ["visionModel", "OPENAI_VISION_MODEL"],
+          ["imageModel", "OPENAI_IMAGE_MODEL"],
+          ["garmentModel", "OPENAI_GARMENT_MODEL"],
+          ["visionBaseUrl", "OPENAI_API_BASE_URL"],
+          ["imageBaseUrl", "QWEN_IMAGE_BASE_URL"],
+        ]) {
+          if (input[field] !== undefined) {
+            const value = typeof input[field] === "string" ? input[field].trim() : "";
+            if (value && envName.endsWith("BASE_URL")) {
+              try {
+                const u = new URL(value);
+                if (!/^https?:$/.test(u.protocol)) throw new Error("protocol");
+              } catch {
+                return json(res, 400, { error: `${field} 必须是合法的 http(s) URL` });
+              }
+            }
+            next[envName] = value;
+          }
+        }
+        if (input.imageQuality !== undefined) {
+          const value = typeof input.imageQuality === "string" ? input.imageQuality.trim().toLowerCase() : "";
+          if (!allowedQualities.has(value)) {
+            return json(res, 400, { error: `imageQuality 必须是 ${[...allowedQualities].join(" / ")} 之一` });
+          }
+          next.OPENAI_IMAGE_QUALITY = value;
+        }
+        if (input.apiKey !== undefined) {
+          const value = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
+          if (!value) return json(res, 400, { error: "apiKey 不能为空；如需清除请直接在 .env 中修改" });
+          next.OPENAI_API_KEY = value;
+        }
+        runtimeSettings = next;
+        await saveRuntimeSettings(dataDir, runtimeSettings);
+        return json(res, 200, publicSettings());
+      }
+      if (url.pathname === "/api/import/settings/reference" && req.method === "GET") {
+        const referenceSetting = setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png");
+        const referencePath = path.resolve(root, referenceSetting);
+        let hasReference = false;
+        try { hasReference = (await stat(referencePath)).isFile(); } catch (error) { if (error.code !== "ENOENT") throw error; }
+        let preview = null;
+        if (hasReference) {
+          const data = await readFile(referencePath);
+          preview = `data:image/png;base64,${data.toString("base64")}`;
+        }
+        return json(res, 200, { modelReference: referenceSetting, hasReference, url: preview });
+      }
+      if (url.pathname === "/api/import/settings/reference" && req.method === "POST") {
+        const input = await body(req);
+        const image = decodeImage(input);
+        const processed = await normalizeImage(image.data);
+        const referenceSetting = setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png");
+        const referencePath = path.resolve(root, referenceSetting);
+        await mkdir(path.dirname(referencePath), { recursive: true });
+        await writeFile(referencePath, processed);
+        return json(res, 200, publicSettings());
       }
       const wardrobeDeleteMatch = url.pathname.match(/^\/api\/import\/wardrobe\/(import-[a-f0-9-]{36})$/i);
       if (wardrobeDeleteMatch && req.method === "DELETE") {
@@ -518,6 +762,49 @@ export function wardrobeImportApi(options = {}) {
         res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         return res.end(await readFile(file));
       }
+      const outfitAssetMatch = url.pathname.match(/^\/api\/import\/outfits\/([\w.-]+)$/i);
+      if (outfitAssetMatch && req.method === "GET") {
+        const file = path.join(outfitDir, path.basename(outfitAssetMatch[1]));
+        await stat(file);
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        return res.end(await readFile(file));
+      }
+      if (url.pathname === "/api/import/outfit" && req.method === "POST") {
+        const setup = await setupStatus();
+        if (!setup.ready) {
+          return json(res, 503, { error: `Setup required: ${!setup.hasApiKey ? "OPENAI_API_KEY in .env" : ""}${!setup.hasApiKey && !setup.hasModelReference ? " and " : ""}${!setup.hasModelReference ? `a PNG photo of yourself at ${setup.modelReference}` : ""}.` });
+        }
+        const input = await body(req);
+        const urls = Array.isArray(input.garmentAssetUrls) ? input.garmentAssetUrls : [];
+        if (urls.length < 1) throw Object.assign(new Error("At least one garment image is required"), { status: 400 });
+        if (urls.length > 9) throw Object.assign(new Error("At most 9 garments can be combined"), { status: 400 });
+        const key = setting("OPENAI_API_KEY");
+        if (!key) throw Object.assign(new Error("OPENAI_API_KEY is not configured"), { status: 503 });
+        // 本人参考照
+        const modelPath = path.resolve(root, setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png"));
+        let modelData;
+        try { modelData = await readFile(modelPath); }
+        catch (error) { if (error.code === "ENOENT") throw Object.assign(new Error(`Model reference not found at ${modelPath}`), { status: 503 }); throw error; }
+        const model = { data: modelData, mime: "image/png", name: "model.png" };
+        // 各衣物切图（库内文件名形如 import-<uuid>-garment.png）
+        const garments = [];
+        for (const rawUrl of urls.slice(0, 9)) {
+          const name = String(rawUrl).includes("/library/")
+            ? String(rawUrl).split("/library/").pop()
+            : String(rawUrl).split("/").pop();
+          const file = path.join(libraryAssetDir, path.basename(name || ""));
+          const data = await readFile(file);
+          garments.push({ data, mime: "image/png", name: "garment.png" });
+        }
+        const prompt = buildOutfitPrompt(garments.length, typeof input.prompt === "string" ? input.prompt.trim().slice(0, 800) || null : null);
+        const bytes = await callImageEdit({ key, model: setting("OPENAI_MODELED_MODEL", imageModel()), prompt, images: [model, ...garments], size: "1536x1024" });
+        const outfitId = randomUUID();
+        const outName = `${outfitId}.png`;
+        await mkdir(outfitDir, { recursive: true });
+        await writeFile(path.join(outfitDir, outName), bytes);
+        return json(res, 200, { imageUrl: `${OUTFIT_ASSET_ROOT}/${outName}`, id: outfitId });
+      }
       const assetMatch = url.pathname.match(/^\/api\/import\/assets\/([a-f0-9-]{36})\/([\w.-]+)$/i);
       if (assetMatch && req.method === "GET") {
         const file = path.join(jobsDir, assetMatch[1], path.basename(assetMatch[2]));
@@ -539,7 +826,7 @@ export function wardrobeImportApi(options = {}) {
         const image = decodeImage(input);
         const normalizedImage = await normalizeImage(image.data);
         const key = setting("OPENAI_API_KEY");
-        const detected = (await openAIAnalyze({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_VISION_MODEL", "gpt-5.4-mini"), image: normalizedImage, mime: "image/png" })).map(normalizeMetadata);
+        const detected = (provider === "qwen" ? await qwenAnalyze({ key, baseUrl: apiBaseUrl(), model: visionModel(), image: normalizedImage, mime: "image/png" }) : await openAIAnalyze({ key, baseUrl: apiBaseUrl(), model: visionModel(), image: normalizedImage, mime: "image/png" })).map(normalizeMetadata);
         const jobs = [];
         for (const metadata of detected) {
           const id = randomUUID();
@@ -633,7 +920,7 @@ export function wardrobeImportApi(options = {}) {
         job.stages[stageName].error = null;
         job.stages[stageName].updatedAt = new Date().toISOString();
         const startGarment = stageName === "crop" && decision === "approve" && job.stages.garment.status === "pending";
-        const startModeled = stageName === "garment" && decision === "approve" && job.stages.modeled.status === "pending";
+        // modeled（上身图）改为完全可选：garment approve 后不再自动生成，由用户在前端手动触发
         if (stageName === "modeled" && decision === "approve") job.status = "complete";
         await saveJob(job);
         if (decision === "approve" && stageName !== "crop") {
@@ -649,7 +936,6 @@ export function wardrobeImportApi(options = {}) {
         }
         if (decision === "reject") await rm(path.join(jobsDir, job.id), { recursive: true, force: true });
         if (startGarment) void generate(job, "garment");
-        if (startModeled) void generate(job, "modeled");
         const response = publicJob(job);
         if (job.status === "complete") await rm(path.join(jobsDir, job.id), { recursive: true, force: true });
         return json(res, 200, response);
@@ -657,7 +943,7 @@ export function wardrobeImportApi(options = {}) {
       return json(res, 404, { error: "Not found" });
     } catch (error) {
       const statusCode = error.code === "ENOENT" ? 404 : error.status || 500;
-      return json(res, statusCode, { error: statusCode === 500 ? "Internal server error" : error.message, ...(process.env.NODE_ENV === "development" && statusCode === 500 ? { detail: error.message } : {}) });
+      return json(res, statusCode, { error: statusCode === 500 ? "服务器内部错误" : error.message, detail: error.message, code: error.code });
     }
   }
 
@@ -666,12 +952,15 @@ export function wardrobeImportApi(options = {}) {
     apply: "serve",
     async configResolved(config) {
       root = config.root;
-      const dataDir = path.resolve(root, setting("WARDROBE_DATA_DIR", "data"));
+      dataDir = path.resolve(root, setting("WARDROBE_DATA_DIR", "data"));
+      runtimeSettings = await loadRuntimeSettings(dataDir);
       jobsDir = path.join(dataDir, "jobs");
       importedFile = path.join(dataDir, "library.json");
       libraryAssetDir = path.join(dataDir, "imported");
+      outfitDir = path.join(dataDir, "outfits");
       await mkdir(jobsDir, { recursive: true });
       await mkdir(libraryAssetDir, { recursive: true });
+      await mkdir(outfitDir, { recursive: true });
       const ids = await readdir(jobsDir).catch(() => []);
       for (const id of ids) {
         const job = await loadJob(id);

@@ -1,22 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash, X } from "@phosphor-icons/react";
+import { Check, Plus, SpinnerGap, Trash, X, MagnifyingGlass, Moon, Sun, TShirt, Gear } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
+import { MobileHome } from "./MobileHome.jsx";
+import { SettingsPanel } from "./SettingsPanel.jsx";
 
 const STORAGE_KEY = "open-wardrobe-edits-v1";
 const DELETED_STORAGE_KEY = "open-wardrobe-deleted-v1";
 
 const TYPES = [
-  { id: "all", label: "All" },
-  { id: "upperbody", label: "Tops", singular: "Top" },
-  { id: "wholebody_up", label: "Jackets", singular: "Jacket" },
-  { id: "lowerbody", label: "Bottoms", singular: "Bottom" },
-  { id: "accessories_up", label: "Accessories", singular: "Accessory" },
-  { id: "shoes", label: "Shoes", singular: "Shoes" },
+  { id: "all", label: "全部" },
+  { id: "upperbody", label: "上衣", singular: "上衣" },
+  { id: "wholebody_up", label: "外套", singular: "外套" },
+  { id: "lowerbody", label: "下装", singular: "下装" },
+  { id: "accessories_up", label: "配饰", singular: "配饰" },
+  { id: "necklace", label: "项链", singular: "项链" },
+  { id: "bag", label: "包包", singular: "包包" },
+  { id: "shoes", label: "鞋履", singular: "鞋履" },
 ];
 
 const TYPE_MAP = Object.fromEntries(TYPES.map((type) => [type.id, type]));
 const TYPE_ORDER = Object.fromEntries(TYPES.slice(1).map((type, index) => [type.id, index]));
+
+const NAV_TITLES = {
+  wardrobe: "衣橱",
+  settings: "设置",
+};
 
 
 function readEdits() {
@@ -153,25 +162,91 @@ function sampleImageColor(image, canvas, event) {
   return null;
 }
 
-function GalleryItem({ item, selected, onOpen }) {
-  const type = TYPE_MAP[item.part]?.singular || "wardrobe item";
+function GalleryItem({ item, selected, onOpen, outfitMode, onToggleOutfit }) {
+  const type = TYPE_MAP[item.part]?.singular || "衣橱单品";
+
+  const handleClick = () => {
+    if (outfitMode) onToggleOutfit(item.id);
+    else onOpen(item.id);
+  };
 
   return (
     <button
-      className={`gallery-item${selected ? " selected" : ""}`}
+      className={`gallery-item${selected ? " selected" : ""}${outfitMode ? " outfit-selectable" : ""}`}
       type="button"
-      onClick={() => onOpen(item.id)}
-      aria-label={`View ${item.name || type}`}
+      onClick={handleClick}
+      aria-label={outfitMode ? `选择 ${item.name || type} 加入搭配` : `查看 ${item.name || type}`}
       aria-pressed={selected}
       data-testid={`wardrobe-item-${item.id}`}
     >
-      <OptimizedImage
-        src={item.thumbnail || item.image}
-        alt=""
-        sizes="(max-width: 520px) calc(50vw - 16px), (max-width: 860px) calc(33vw - 18px), 180px"
-        breakpoints={[120, 180, 240, 320, 480]}
-      />
+      <div className="gallery-item__media">
+        <OptimizedImage
+          src={item.thumbnail || item.image}
+          alt=""
+          sizes="(max-width: 520px) calc(50vw - 16px), (max-width: 860px) calc(33vw - 18px), 240px"
+          breakpoints={[120, 180, 240, 320, 480]}
+        />
+      </div>
+      <div className="gallery-item__info">
+        <span className="gallery-item__name">{item.name || type}</span>
+        <span className="gallery-item__type">{type}</span>
+      </div>
+      {outfitMode && (
+        <span className="outfit-check" aria-hidden="true">
+          <Check size={16} weight="bold" />
+        </span>
+      )}
     </button>
+  );
+}
+
+function OutfitResultModal({ imageUrl, prompt, onPromptChange, onRegenerate, onClose, loading, error, isStitch, onStitch }) {
+  return (
+    <div className="viewer-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="outfit-modal" role="dialog" aria-modal="true" aria-label={isStitch ? "搭配拼接预览" : "搭配上身效果"}>
+        <button className="viewer-icon-close" type="button" onClick={onClose} aria-label="关闭搭配结果">
+          <X size={24} weight="light" aria-hidden="true" />
+        </button>
+        <h2 className="outfit-modal__title">{isStitch ? "搭配拼接预览" : "搭配上身效果"}</h2>
+        {error && <p className="status error" role="status">{error}</p>}
+        {loading && (
+          <div className="outfit-loading">
+            <SpinnerGap size={32} className="import-spinner" />
+            <span>{isStitch ? "正在拼接产品图…" : "正在生成搭配上身图…"}</span>
+          </div>
+        )}
+        {imageUrl && !loading && (
+          <OptimizedImage
+            className="outfit-result-photo"
+            src={imageUrl}
+            alt={isStitch ? "搭配拼接预览" : "搭配上身效果"}
+            sizes="(max-width: 860px) 100vw, 640px"
+            breakpoints={[320, 480, 640, 800, 1024]}
+            priority
+          />
+        )}
+        {!isStitch && (
+          <div className="outfit-prompt-row">
+            <input
+              value={prompt}
+              onChange={(event) => onPromptChange(event.target.value)}
+              placeholder="额外搭配方向（可选），例如：暖色系、通勤风"
+              aria-label="额外搭配方向"
+            />
+            <button className="primary-button" type="button" onClick={onRegenerate} disabled={loading}>
+              <Check size={15} weight="bold" aria-hidden="true" /> 重新生成
+            </button>
+          </div>
+        )}
+        {isStitch && (
+          <div className="outfit-prompt-row">
+            <button className="primary-button" type="button" onClick={onStitch} disabled={loading}>
+              <Check size={15} weight="bold" aria-hidden="true" /> 重新拼接
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -191,7 +266,7 @@ function TagEditor({ tags, onChange }) {
         {tags.map((tag) => (
           <span className="editable-tag" key={tag}>
             {tag}
-            <button type="button" onClick={() => onChange(tags.filter((existing) => existing !== tag))} aria-label={`Remove ${tag}`}>
+            <button type="button" onClick={() => onChange(tags.filter((existing) => existing !== tag))} aria-label={`移除 ${tag}`}>
               <X size={12} weight="regular" aria-hidden="true" />
             </button>
           </span>
@@ -207,10 +282,10 @@ function TagEditor({ tags, onChange }) {
               addTag();
             }
           }}
-          placeholder="Add a detail"
-          aria-label="Add detail tag"
+          placeholder="添加细节"
+          aria-label="添加细节标签"
         />
-        <button type="button" onClick={addTag} disabled={!input.trim()} aria-label="Add detail">
+        <button type="button" onClick={addTag} disabled={!input.trim()} aria-label="添加细节">
           <Plus size={15} weight="regular" aria-hidden="true" />
         </button>
       </div>
@@ -224,10 +299,10 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
       <div className="color-slot empty-color-slot">
         <div className="color-slot-heading">
           <span>{label}</span>
-          <small>Optional</small>
+          <small>可选</small>
         </div>
-        <p>No distinct secondary color detected.</p>
-        <button className="add-secondary-button" type="button" onClick={onAdd}>Add secondary color</button>
+        <p>未检测到明显的次要颜色。</p>
+        <button className="add-secondary-button" type="button" onClick={onAdd}>添加次要颜色</button>
       </div>
     );
   }
@@ -243,18 +318,18 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
           type="color"
           value={value || "#9a9286"}
           onChange={(event) => onChange(event.target.value)}
-          aria-label={`Choose ${label.toLowerCase()}`}
+          aria-label={`选择${label}`}
         />
         <span className="selected-color-copy">
-          <small>Selected</small>
-          <strong>{value || "Custom"}</strong>
+          <small>已选</small>
+          <strong>{value || "自定义"}</strong>
         </span>
       </label>
       <div className="suggestion-heading">
-        <span>Image suggestions</span>
-        <small>Click to apply</small>
+        <span>图片建议色</span>
+        <small>点击应用</small>
       </div>
-      <div className="palette" aria-label={`${label} suggestions from image`}>
+      <div className="palette" aria-label={`${label} 图片建议色`}>
         {palette.map((color) => (
           <button
             type="button"
@@ -262,7 +337,7 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
             className={value?.toLowerCase() === color.toLowerCase() ? "active" : ""}
             style={{ backgroundColor: color }}
             onClick={() => onChange(color)}
-            aria-label={`Use ${color} as ${label.toLowerCase()}`}
+            aria-label={`使用 ${color} 作为${label}`}
             title={color}
           />
         ))}
@@ -272,7 +347,7 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
         type="button"
         onClick={() => setSampling((current) => current === field ? null : field)}
       >
-        {sampling === field ? "Cancel picking" : `Pick ${label.toLowerCase()} from image`}
+        {sampling === field ? "取消取色" : `从图片取${label}`}
       </button>
     </div>
   );
@@ -284,26 +359,26 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
   return (
     <div className="item-editor">
       <label className="field">
-        <span>Name</span>
+        <span>名称</span>
         <input
           value={draft.name}
           onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-          placeholder={TYPE_MAP[draft.part]?.singular || "Wardrobe item"}
+          placeholder={TYPE_MAP[draft.part]?.singular || "衣橱单品"}
         />
       </label>
 
       <label className="field">
-        <span>Category</span>
+        <span>类别</span>
         <select value={draft.part} onChange={(event) => setDraft((current) => ({ ...current, part: event.target.value }))}>
           {TYPES.slice(1).map((type) => <option value={type.id} key={type.id}>{type.label}</option>)}
         </select>
       </label>
 
       <fieldset className="color-field">
-        <legend>Colors</legend>
+        <legend>颜色</legend>
         <div className="colors-editor">
           <ColorControl
-            label="Primary color"
+            label="主色"
             field="primary"
             value={draft.color}
             palette={palette}
@@ -312,7 +387,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
             setSampling={setSampling}
           />
           <ColorControl
-            label="Secondary color"
+            label="次要颜色"
             field="secondary"
             value={draft.secondaryColor}
             palette={palette}
@@ -324,11 +399,11 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
             onAdd={() => setDraft((current) => ({ ...current, secondaryColor: suggestedSecondary }))}
           />
         </div>
-        <p className="color-help" aria-live="polite">{sampling ? `Click anywhere on the garment to sample the ${sampling} color.` : sampleStatus || "Primary colors come from the image. A secondary is suggested only when a distinct color has meaningful coverage."}</p>
+        <p className="color-help" aria-live="polite">{sampling ? `点击衣物任意位置提取${sampling}颜色。` : sampleStatus || "主色取自图片。仅当某颜色占有明显面积时才会建议次要颜色。"}</p>
       </fieldset>
 
       <div className="field details-field">
-        <span>Details</span>
+        <span>细节</span>
         <TagEditor tags={draft.tags} onChange={(tags) => setDraft((current) => ({ ...current, tags }))} />
       </div>
     </div>
@@ -346,7 +421,7 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   const [draft, setDraft] = useState({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
   const [shaking, setShaking] = useState(false);
   const [closeBlocked, setCloseBlocked] = useState(false);
-  const type = TYPE_MAP[item.part]?.singular || "Wardrobe item";
+  const type = TYPE_MAP[item.part]?.singular || "衣橱单品";
   const hasModeledImage = Boolean(item.modeledImage);
   const pieceRotation = useMemo(() => {
     const hash = [...item.id].reduce((total, character) => total + character.charCodeAt(0), 0);
@@ -424,7 +499,7 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   const saveEditing = () => {
     onSave({ ...item, ...draft, name: draft.name.trim(), tags: draft.tags.map((tag) => tag.trim()).filter(Boolean) });
     setSampling(null);
-    setSampleStatus("Changes saved.");
+    setSampleStatus("修改已保存。");
   };
 
   const handleImageLoad = (event) => {
@@ -437,13 +512,13 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
     if (!sampling || !samplingCanvasRef.current) return;
     const color = sampleImageColor(event.currentTarget, samplingCanvasRef.current, event);
     if (!color) {
-      setSampleStatus("That spot is transparent—try directly on the garment.");
+      setSampleStatus("该处为透明区域，请直接在衣物上取色。");
       return;
     }
     const targetField = sampling === "secondary" ? "secondaryColor" : "color";
     setDraft((current) => ({ ...current, [targetField]: color }));
     setPalette((current) => [color, ...current.filter((existing) => existing.toLowerCase() !== color.toLowerCase())].slice(0, 5));
-    setSampleStatus(`Sampled ${color} as the ${sampling} color.`);
+    setSampleStatus(`已将 ${color} 提取为${sampling}颜色。`);
     setSampling(null);
   };
 
@@ -455,22 +530,22 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
       <OptimizedImage
         ref={imageRef}
         src={item.image}
-        alt={`Selected ${type.toLowerCase()}`}
+        alt={`选中的${type}`}
         sizes="(max-width: 520px) 40vw, 300px"
         breakpoints={[160, 240, 320, 480, 640]}
         priority
         onLoad={handleImageLoad}
         onClick={handleImageClick}
       />
-      {sampling && <span className="sample-hint">Click garment to sample</span>}
+      {sampling && <span className="sample-hint">点击衣物取色</span>}
     </div>
   );
 
   return (
     <div className="viewer-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && requestClose()}>
     <div className="viewer-entry">
-    <aside className={`viewer editing${hasModeledImage ? " has-modeled-image" : ""}${shaking ? " shake" : ""}`} role="dialog" aria-modal="true" aria-label="Selected wardrobe item">
-      <button className="viewer-icon-close" type="button" onClick={requestClose} aria-label="Close viewer" ref={closeButtonRef}>
+    <aside className={`viewer editing${hasModeledImage ? " has-modeled-image" : ""}${shaking ? " shake" : ""}`} role="dialog" aria-modal="true" aria-label="选中的衣橱单品">
+      <button className="viewer-icon-close" type="button" onClick={requestClose} aria-label="关闭查看器" ref={closeButtonRef}>
         <X size={24} weight="light" aria-hidden="true" />
       </button>
 
@@ -479,7 +554,7 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
           <OptimizedImage
             className="modeled-hero-photo"
             src={item.modeledImage}
-            alt={`${draft.name || type} worn by a model`}
+            alt={`${draft.name || type} 上身效果`}
             sizes="(max-width: 860px) 100vw, 520px"
             breakpoints={[320, 480, 640, 800, 1040, 1280]}
             quality={82}
@@ -513,16 +588,16 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
           sampleStatus={sampleStatus}
         />
 
-        {closeBlocked && <p className="unsaved-notice" role="status">Save or cancel changes before closing.</p>}
+        {closeBlocked && <p className="unsaved-notice" role="status">关闭前请先保存或取消修改。</p>}
 
         <div className="viewer-actions">
           <button className="delete-button" type="button" onClick={() => onDelete(item.id)}>
-            <Trash size={15} weight="regular" aria-hidden="true" /> Delete
+            <Trash size={15} weight="regular" aria-hidden="true" /> 删除
           </button>
           <span className="action-spacer" />
-          <button className="secondary-button" type="button" onClick={cancelEditing}>Cancel</button>
+          <button className="secondary-button" type="button" onClick={cancelEditing}>取消</button>
           <button className="primary-button" type="button" onClick={saveEditing}>
-            <Check size={15} weight="bold" aria-hidden="true" /> Save
+            <Check size={15} weight="bold" aria-hidden="true" /> 保存
           </button>
         </div>
       </div>
@@ -538,11 +613,31 @@ export function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [outfitMode, setOutfitMode] = useState(false);
+  const [selectedOutfitIds, setSelectedOutfitIds] = useState([]);
+  const [outfitResult, setOutfitResult] = useState(null);
+  const [outfitLoading, setOutfitLoading] = useState(false);
+  const [outfitError, setOutfitError] = useState("");
+  const [outfitPrompt, setOutfitPrompt] = useState("");
+  const [outfitIsStitch, setOutfitIsStitch] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem("wardrobe-theme");
+    if (saved === "light" || saved === "dark") return saved;
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+  const [activeNav, setActiveNav] = useState("wardrobe");
+  const importTriggerRef = useRef(null);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("wardrobe-theme", theme); } catch { /* ignore */ }
+  }, [theme]);
 
   useEffect(() => {
     fetch("/api/import/wardrobe", { cache: "no-store" })
       .then((response) => {
-        if (!response.ok) throw new Error("Could not load the wardrobe.");
+        if (!response.ok) throw new Error("无法加载衣橱。");
         return response.json();
       })
       .then((loadedItems) => {
@@ -558,7 +653,16 @@ export function App() {
   const selectedItem = items.find((item) => item.id === selectedId) || null;
 
   const visibleItems = useMemo(() => {
-    const filtered = activeType === "all" ? items : items.filter((item) => item.part === activeType);
+    const term = search.trim().toLowerCase();
+    const typeFiltered = activeType === "all" ? items : items.filter((item) => item.part === activeType);
+    const filtered = term
+      ? typeFiltered.filter((item) => {
+          const name = String(item.name || "").toLowerCase();
+          const part = String(item.part || "").toLowerCase();
+          const palette = Array.isArray(item.palette) ? item.palette.join(" ").toLowerCase() : "";
+          return name.includes(term) || part.includes(term) || palette.includes(term);
+        })
+      : typeFiltered;
     return [...filtered].sort((a, b) => {
       if (activeType === "all") {
         const typeDifference = (TYPE_ORDER[a.part] ?? 99) - (TYPE_ORDER[b.part] ?? 99);
@@ -566,7 +670,7 @@ export function App() {
       }
       return a.id.localeCompare(b.id);
     });
-  }, [activeType, items]);
+  }, [activeType, items, search]);
 
   const chooseType = (typeId) => {
     setActiveType(typeId);
@@ -582,7 +686,7 @@ export function App() {
     if (id.startsWith("import-")) {
       try {
         const response = await fetch(`/api/import/wardrobe/${id}`, { method: "DELETE" });
-        if (!response.ok && response.status !== 404) throw new Error("Could not delete the imported item.");
+        if (!response.ok && response.status !== 404) throw new Error("无法删除已导入的单品。");
       } catch (requestError) {
         setError(requestError.message);
         return;
@@ -603,48 +707,342 @@ export function App() {
     setItems((current) => current.map((item) => item.id === id ? { ...item, modeledImage } : item));
   }, []);
 
+  const toggleOutfitMode = useCallback(() => {
+    setOutfitMode((current) => {
+      if (!current) setSelectedId(null);
+      return !current;
+    });
+    setSelectedOutfitIds([]);
+    setOutfitResult(null);
+    setOutfitError("");
+  }, []);
+
+  const toggleOutfitItem = useCallback((id) => {
+    setSelectedOutfitIds((current) => current.includes(id) ? current.filter((existing) => existing !== id) : [...current, id]);
+  }, []);
+
+  const generateOutfit = useCallback(async () => {
+    if (selectedOutfitIds.length < 1) return;
+    const chosen = items.filter((item) => selectedOutfitIds.includes(item.id));
+    const garmentAssetUrls = chosen.map((item) => item.image);
+    setOutfitLoading(true);
+    setOutfitError("");
+    setOutfitResult(null);
+    setOutfitIsStitch(false);
+    try {
+      const response = await fetch("/api/import/outfit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ garmentAssetUrls, prompt: outfitPrompt.trim() || undefined }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const rawMessage = data.detail || data.error || `生成失败 (${response.status})`;
+        let friendly = rawMessage;
+        if (/overdue-payment|Access denied|good standing|insufficient/i.test(rawMessage)) {
+          friendly = "千问账号状态异常或欠费，无法生成图像。请到阿里云百炼控制台确认账户余额/状态后重试。";
+        }
+        throw new Error(friendly);
+      }
+      const data = await response.json();
+      setOutfitResult(data.imageUrl);
+    } catch (requestError) {
+      setOutfitError(requestError.message);
+    } finally {
+      setOutfitLoading(false);
+    }
+  }, [selectedOutfitIds, items, outfitPrompt]);
+
+  const stitchOutfit = useCallback(() => {
+    const chosen = items.filter((item) => selectedOutfitIds.includes(item.id));
+    if (chosen.length < 1) return;
+    setOutfitLoading(true);
+    setOutfitError("");
+    setOutfitResult(null);
+    setOutfitIsStitch(true);
+
+    // 身体部位 → 画布区域（相对坐标：x 中心锚定，y 顶部比例，w/h 宽高比例）
+    const PART_ZONES = {
+      accessories_up: { x: 0.50, y: 0.04, w: 0.36, h: 0.18 }, // 帽/头饰 → 头部
+      necklace:       { x: 0.50, y: 0.16, w: 0.30, h: 0.12 }, // 项链 → 颈部（领口下方）
+      upperbody:      { x: 0.50, y: 0.22, w: 0.48, h: 0.28 }, // 上衣 → 胸/躯干
+      wholebody_up:   { x: 0.50, y: 0.20, w: 0.58, h: 0.40 }, // 外套 → 覆盖躯干（宽于上衣）
+      lowerbody:      { x: 0.50, y: 0.52, w: 0.38, h: 0.38 }, // 下装 → 腿
+      bag:            { x: 0.76, y: 0.46, w: 0.30, h: 0.34 }, // 包包 → 身侧/手部
+      shoes:          { x: 0.50, y: 0.89, w: 0.42, h: 0.10 }, // 鞋履 → 脚
+    };
+    // 由内到外的图层顺序：下装/鞋先画 → 上衣 → 外套压在上面 → 帽子/项链 → 包包最前
+    const Z_ORDER = ["lowerbody", "shoes", "upperbody", "wholebody_up", "accessories_up", "necklace", "bag"];
+
+    const sorted = [...chosen].sort((a, b) => {
+      const orderA = Z_ORDER.indexOf(a.part);
+      const orderB = Z_ORDER.indexOf(b.part);
+      return (orderA === -1 ? 99 : orderA) - (orderB === -1 ? 99 : orderB);
+    });
+
+    const loadImage = (item) => new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({ img, item });
+      img.onerror = () => reject(new Error(`「${item.name || "单品"}」图片加载失败`));
+      img.src = item.image;
+    });
+
+    Promise.all(sorted.map(loadImage))
+      .then((loaded) => {
+        const W = 540;
+        const H = 820;
+        const canvas = document.createElement("canvas");
+        canvas.width = W;
+        canvas.height = H;
+        const context = canvas.getContext("2d");
+        const paper = getComputedStyle(document.documentElement).getPropertyValue("--paper")?.trim() || "#f7f4ef";
+        const ink = getComputedStyle(document.documentElement).getPropertyValue("--ink")?.trim() || "#3a352c";
+
+        // 背景
+        context.fillStyle = paper;
+        context.fillRect(0, 0, W, H);
+
+        // 简单人体轮廓（头/颈/躯干/腿/脚），极淡，作叠放参考
+        const cx = W / 2;
+        context.fillStyle = "rgba(155, 145, 128, 0.14)";
+        context.strokeStyle = "rgba(110, 100, 88, 0.30)";
+        context.lineWidth = 1.5;
+        // 头
+        context.beginPath();
+        context.ellipse(cx, H * 0.13, W * 0.105, H * 0.055, 0, 0, Math.PI * 2);
+        context.fill(); context.stroke();
+        // 颈
+        context.fillRect(cx - W * 0.045, H * 0.185, W * 0.09, H * 0.022);
+        context.strokeRect(cx - W * 0.045, H * 0.185, W * 0.09, H * 0.022);
+        // 躯干（肩→腰）
+        const shoulderTop = H * 0.205;
+        const shoulderW = W * 0.34;
+        const waistY = H * 0.50;
+        const waistW = W * 0.24;
+        context.beginPath();
+        context.moveTo(cx - shoulderW / 2, shoulderTop);
+        context.lineTo(cx + shoulderW / 2, shoulderTop);
+        context.lineTo(cx + waistW / 2, waistY);
+        context.lineTo(cx - waistW / 2, waistY);
+        context.closePath();
+        context.fill(); context.stroke();
+        // 腿（腰→脚踝）
+        const legBotY = H * 0.90;
+        const legBotW = W * 0.22;
+        context.beginPath();
+        context.moveTo(cx - waistW / 2, waistY);
+        context.lineTo(cx + waistW / 2, waistY);
+        context.lineTo(cx + legBotW / 2, legBotY);
+        context.lineTo(cx - legBotW / 2, legBotY);
+        context.closePath();
+        context.fill(); context.stroke();
+        // 脚
+        context.beginPath();
+        context.ellipse(cx - legBotW * 0.30, legBotY + H * 0.018, W * 0.08, H * 0.014, 0, 0, Math.PI * 2);
+        context.fill(); context.stroke();
+        context.beginPath();
+        context.ellipse(cx + legBotW * 0.30, legBotY + H * 0.018, W * 0.08, H * 0.014, 0, 0, Math.PI * 2);
+        context.fill(); context.stroke();
+
+        // 沿人体结构叠加各件衣物（透明背景会透出轮廓 → 看起来像穿在身上）
+        loaded.forEach(({ img, item }) => {
+          const zone = PART_ZONES[item.part];
+          if (!zone) return;
+          const zw = zone.w * W;
+          const zh = zone.h * H;
+          const zx = (zone.x - zone.w / 2) * W;
+          const zy = zone.y * H;
+          const fit = Math.min(zw / img.naturalWidth, zh / img.naturalHeight);
+          const dw = img.naturalWidth * fit;
+          const dh = img.naturalHeight * fit;
+          const dx = zx + (zw - dw) / 2;
+          const dy = zy + (zh - dh) / 2;
+          context.drawImage(img, dx, dy, dw, dh);
+        });
+
+        // 底部一行小字列出选中的单品（用于识别，不遮挡轮廓）
+        context.fillStyle = ink;
+        context.font = "12px system-ui, sans-serif";
+        context.textAlign = "center";
+        const legend = sorted.map((item) => String(item.name || "单品").slice(0, 12)).join(" · ");
+        context.fillText(legend, cx, H - 10);
+
+        setOutfitResult(canvas.toDataURL("image/png"));
+      })
+      .catch((stitchError) => setOutfitError(stitchError.message || "拼接失败，请重试。"))
+      .finally(() => setOutfitLoading(false));
+  }, [selectedOutfitIds, items]);
+
   return (
-    <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
-      <main className="gallery-pane">
-        <header className="gallery-header">
-          <div className="gallery-meta-row">
-            <p className="piece-count">{items.length} {items.length === 1 ? "piece" : "pieces"}</p>
+    <>
+      <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
+        <aside className="app-sidebar" aria-label="主导航">
+          <div className="app-sidebar__brand">
+            <span className="app-sidebar__logo">衣</span>
+            <div className="app-sidebar__brand-text">
+              <span className="app-sidebar__brand-name">衣橱</span>
+              <span className="app-sidebar__brand-sub">WARDROBE</span>
+            </div>
           </div>
-          <nav className="category-nav" aria-label="Filter wardrobe by item type">
-            {TYPES.map((type) => (
+
+          <nav className="app-nav" aria-label="主导航菜单">
+            {[
+              { id: "wardrobe", label: "衣橱", Icon: TShirt },
+              { id: "settings", label: "设置", Icon: Gear },
+            ].map(({ id, label, Icon }) => (
               <button
-                key={type.id}
+                key={id}
                 type="button"
-                className={activeType === type.id ? "active" : ""}
-                onClick={() => chooseType(type.id)}
-                aria-pressed={activeType === type.id}
+                className={`app-nav__item${activeNav === id ? " active" : ""}`}
+                onClick={() => setActiveNav(id)}
+                aria-pressed={activeNav === id}
               >
-                {type.label}
+                <Icon size={18} weight={activeNav === id ? "fill" : "regular"} aria-hidden="true" />
+                <span>{label}</span>
               </button>
             ))}
           </nav>
-        </header>
 
-        {error && <p className="status error">{error}</p>}
-        {!error && loading && <p className="status">Loading wardrobe</p>}
-        {!error && !loading && !items.length && <p className="status empty">Drop, paste, or add a photo to import your first piece.</p>}
+          <button type="button" className="app-import-btn" onClick={() => importTriggerRef.current?.click()}>
+            <Plus size={16} weight="bold" aria-hidden="true" /> 导入单品
+          </button>
 
-        {!!items.length && (
-          <section className="gallery-grid" aria-label={`${TYPE_MAP[activeType]?.label || "All"} wardrobe items`}>
-            {visibleItems.map((item) => (
-              <GalleryItem
-                key={item.id}
-                item={item}
-                selected={selectedId === item.id}
-                onOpen={setSelectedId}
-              />
-            ))}
-          </section>
-        )}
-      </main>
+          <div className="app-sidebar__profile">
+            <div className="app-sidebar__avatar" aria-hidden="true">A</div>
+            <div className="app-sidebar__profile-text">
+              <p className="app-sidebar__profile-name">我的衣橱</p>
+              <p className="app-sidebar__profile-email">{items.length} 件单品</p>
+            </div>
+          </div>
+        </aside>
 
-      {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} />}
-      <WardrobeImportFlow onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} />
-    </div>
+        <div className="app-main">
+          <header className="app-topbar">
+            <div className="app-topbar__title-group">
+              <h1 className="app-topbar__title">{NAV_TITLES[activeNav]}</h1>
+              <p className="app-topbar__subtitle">{items.length} 件单品</p>
+            </div>
+            <div className="app-topbar__controls">
+              <div className="app-search">
+                <MagnifyingGlass size={16} aria-hidden="true" />
+                <input
+                  type="search"
+                  placeholder="搜索单品"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  aria-label="搜索衣橱单品"
+                />
+              </div>
+              <button
+                type="button"
+                className="app-icon-btn"
+                onClick={() => setTheme((currentTheme) => (currentTheme === "dark" ? "light" : "dark"))}
+                aria-label={theme === "dark" ? "切换到浅色" : "切换到深色"}
+              >
+                {theme === "dark" ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
+              </button>
+              <button
+                type="button"
+                className={`outfit-toggle${outfitMode ? " active" : ""}`}
+                onClick={toggleOutfitMode}
+                aria-pressed={outfitMode}
+              >
+                {outfitMode ? "退出搭配" : "搭配"}
+              </button>
+              <div className="app-topbar__avatar" aria-hidden="true">A</div>
+            </div>
+          </header>
+
+          {activeNav === "wardrobe" ? (
+            <main className="gallery-pane">
+              <nav className="category-nav" aria-label="按单品种类筛选衣橱">
+                {TYPES.map((type) => (
+                  <button
+                    key={type.id}
+                    type="button"
+                    className={activeType === type.id ? "active" : ""}
+                    onClick={() => chooseType(type.id)}
+                    aria-pressed={activeType === type.id}
+                  >
+                    {type.label}
+                  </button>
+                ))}
+              </nav>
+
+              {error && <p className="status error">{error}</p>}
+              {!error && loading && <p className="status">正在加载衣橱</p>}
+              {!error && !loading && !items.length && <p className="status empty">拖入、粘贴或添加照片，导入你的第一件单品。</p>}
+
+              {!!items.length && (
+                <section className={`gallery-grid${outfitMode ? " outfit-grid" : ""}`} aria-label={`${TYPE_MAP[activeType]?.label || "全部"} 衣橱单品`}>
+                  {visibleItems.map((item) => (
+                    <GalleryItem
+                      key={item.id}
+                      item={item}
+                      selected={outfitMode ? selectedOutfitIds.includes(item.id) : selectedId === item.id}
+                      onOpen={setSelectedId}
+                      outfitMode={outfitMode}
+                      onToggleOutfit={toggleOutfitItem}
+                    />
+                  ))}
+                </section>
+              )}
+            </main>
+          ) : activeNav === "settings" ? (
+            <SettingsPanel />
+          ) : (
+            <div className="app-placeholder">
+              <div className="app-placeholder__icon">
+                <Gear size={32} weight="duotone" aria-hidden="true" />
+              </div>
+              <h2>{NAV_TITLES[activeNav]}模块建设中</h2>
+              <p>该模块尚未实现，敬请期待。</p>
+            </div>
+          )}
+
+          {selectedItem && !outfitMode && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} />}
+
+          {outfitMode && selectedOutfitIds.length > 0 && (
+            <div className="outfit-bar" role="region" aria-label="搭配生成">
+              <span className="outfit-bar__count">已选 {selectedOutfitIds.length} 件</span>
+              <span className="action-spacer" />
+              <button className="secondary-button" type="button" onClick={() => setSelectedOutfitIds([])}>清空</button>
+              <button className="secondary-button" type="button" onClick={stitchOutfit} disabled={outfitLoading}>
+                直接拼接
+              </button>
+              <button className="primary-button" type="button" onClick={generateOutfit} disabled={outfitLoading}>
+                {outfitLoading ? <SpinnerGap size={15} className="import-spinner" /> : <Check size={15} weight="bold" aria-hidden="true" />} 生成上身图
+              </button>
+            </div>
+          )}
+
+          {(outfitResult || outfitLoading || outfitError) && (
+            <OutfitResultModal
+              imageUrl={outfitResult}
+              prompt={outfitPrompt}
+              onPromptChange={setOutfitPrompt}
+              onRegenerate={generateOutfit}
+              onClose={() => { setOutfitResult(null); setOutfitError(""); setOutfitIsStitch(false); }}
+              loading={outfitLoading}
+              error={outfitError}
+              isStitch={outfitIsStitch}
+              onStitch={stitchOutfit}
+            />
+          )}
+        </div>
+
+        <WardrobeImportFlow onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} triggerRef={importTriggerRef} />
+      </div>
+      <div className="mobile-mount">
+        <MobileHome
+          items={visibleItems}
+          activeCategory={activeType}
+          onSelectCategory={chooseType}
+          onOpenItem={(it) => setSelectedId(it.id)}
+          activeTab="wardrobe"
+          onSelectTab={() => {}}
+        />
+      </div>
+    </>
   );
 }
