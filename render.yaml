@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: wardrobe
+    runtime: node
+    plan: free
+    # 离中国最近的节点，降低安卓同事访问延迟（也可在后台改 oregon/frankfurt）
+    region: singapore
+    branch: main
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # 敏感 Key 不进仓库，留空在 Render 后台手动填（sync:false）
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_VISION_MODEL
+        value: qwen3.7-plus-2026-05-26
+      - key: OPENAI_IMAGE_MODEL
+        value: qwen-image-2.0-pro-2026-06-22
+      - key: OPENAI_GARMENT_MODEL
+        value: qwen-image-2.0-pro-2026-06-22
+      - key: OPENAI_IMAGE_QUALITY
+        value: high
+      - key: WARDROBE_AI_PROVIDER
+        value: qwen
+      - key: OPENAI_API_BASE_URL
+        value: https://dashscope.aliyuncs.com/compatible-mode/v1
+      - key: QWEN_IMAGE_BASE_URL
+        value: https://dashscope.aliyuncs.com
+      - key: WARDROBE_MODEL_REFERENCE
+        value: data/model-reference.png
