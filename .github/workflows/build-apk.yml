@@ -10,6 +10,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Checkout 代码
         uses: actions/checkout@v4
@@ -44,11 +47,21 @@ jobs:
         run: npx cap add android && npx cap sync android
 
       - name: 构建 debug APK
-        run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/gradle.log"
         env:
           GRADLE_OPTS: "-Xmx2048m"
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+
+      - name: 上报构建错误（失败时）
+        if: failure()
+        run: |
+          tail -n 220 "$GITHUB_WORKSPACE/gradle.log" > /tmp/err.txt
+          gh issue create --title "Android build failed #${{ github.run_number }}" --body-file /tmp/err.txt || true
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: 上传 APK 产物
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: wardrobe-app-debug
