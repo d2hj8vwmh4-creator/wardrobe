@@ -6,3 +6,8 @@ data/
 docs/
 *.zip
 .DS_Store
+
+# CI 本地调试产物（不入库）
+gh-*.json
+gh-*.txt
+watch2.js

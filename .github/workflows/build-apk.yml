@@ -46,23 +46,75 @@ jobs:
       - name: Capacitor 生成并同步安卓工程
         run: npx cap add android && npx cap sync android
 
-      - name: 构建 debug APK
-        run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/gradle.log"
+      # 关键修复：用 set -o pipefail 让 gradle 真实退出码透传；tee 只是为了留日志
+      - name: 构建 debug APK（失败时 abort）
+        id: gradle
+        run: |
+          set -o pipefail
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace --info 2>&1 | tee "$GITHUB_WORKSPACE/gradle.log"
         env:
           GRADLE_OPTS: "-Xmx2048m"
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
+      # 失败诊断：把 log 摘要写到 step summary（我能从 API 读到，公开仓库我无需登录）
       - name: 上报构建错误（失败时）
-        if: failure()
+        if: steps.gradle.outcome == 'failure'
         run: |
-          tail -n 220 "$GITHUB_WORKSPACE/gradle.log" > /tmp/err.txt
-          gh issue create --title "Android build failed #${{ github.run_number }}" --body-file /tmp/err.txt || true
+          {
+            echo "## Gradle 构建失败（run #${{ github.run_number }}）"
+            echo ""
+            echo "### 终末 200 行日志："
+            echo '```'
+            tail -n 200 "$GITHUB_WORKSPACE/gradle.log" 2>/dev/null || echo "(no log)"
+            echo '```'
+            echo ""
+            echo "### outputs/apk 目录状态："
+            echo '```'
+            ls -la android/app/build/outputs/apk/debug/ 2>&1 || echo "(no dir)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 同时建 Issue 备份（用户在网页也能看）
+          {
+            echo "## Gradle 构建失败（run #${{ github.run_number }}）"
+            echo ""
+            echo "### 终末 200 行日志："
+            echo '```'
+            tail -n 200 "$GITHUB_WORKSPACE/gradle.log" 2>/dev/null || echo "(no log)"
+            echo '```'
+            echo ""
+            echo "### outputs/apk 目录状态："
+            echo '```'
+            ls -la android/app/build/outputs/apk/debug/ 2>&1 || echo "(no dir)"
+            echo '```'
+          } > /tmp/err.md
+          gh issue create --title "Android build failed #${{ github.run_number }}" --body-file /tmp/err.md || true
         env:
           GH_TOKEN: ${{ github.token }}
 
+      # 关键修复：必须先确认 APK 真存在；不存在就不继续 + 直接 fail
+      - name: 校验 APK 存在
+        id: check_apk
+        run: |
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK" ]; then
+            echo "❌ APK not found at $APK"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "APK not found at $APK" >> "$GITHUB_STEP_SUMMARY"
+            ls -la android/app/build/outputs/ 2>&1 >> "$GITHUB_STEP_SUMMARY" || true
+            find android/app/build -name "*.apk" 2>/dev/null | head -20 >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "✅ APK found: $(du -h $APK | cut -f1)"
+          ls -la "$APK" >> "$GITHUB_STEP_SUMMARY"
+
+      # 关键修复：找不到文件必须 error，不准沉默 warn
       - name: 上传 APK 产物
-        if: success()
+        if: steps.check_apk.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: wardrobe-app-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
