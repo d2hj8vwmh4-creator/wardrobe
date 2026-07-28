@@ -22,11 +22,12 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup JDK 17
+      # Capacitor 7 的 @capacitor/android 要求 Java 21 编译（sourceCompatibility VERSION_21），必须用 JDK 21
+      - name: Setup JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       # 云端自动装 Android cmdline-tools 并设置 ANDROID_HOME
       - name: Setup Android SDK
