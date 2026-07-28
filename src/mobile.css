@@ -25,23 +25,6 @@
 
 .mobile-home * { box-sizing: border-box; }
 
-/* 状态栏 */
-.m-statusbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 44px;
-  padding: 0 20px;
-  font-size: 15px;
-  font-weight: 600;
-}
-.m-battery {
-  width: 16px;
-  height: 9px;
-  border-radius: 2px;
-  background: var(--m-fg);
-}
-
 /* 顶栏 */
 .m-appbar {
   display: flex;
@@ -276,7 +259,19 @@
   font-size: 14px;
 }
 
-/* 设置页挂载点：给底部 tabbar 留出安全间距 */
+/* 设置页挂载点：跟随移动端浅色调，避免桌面 data-theme=dark 导致黑底 */
 .m-settings-mount {
+  --primary: var(--m-primary);
+  --fg-strong: var(--m-fg);
+  --fg: var(--m-fg);
+  --muted: var(--m-muted);
+  --border: var(--m-border);
+  --card: var(--m-bg);
+  --surface: var(--m-surface);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   padding: 8px 16px 80px;
+  background: var(--m-bg);
+  color: var(--m-fg);
 }

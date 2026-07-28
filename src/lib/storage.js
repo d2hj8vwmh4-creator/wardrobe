@@ -18,9 +18,20 @@ async function fsMkdir(path) {
   }
 }
 
+// 确保根目录存在：Android Filesystem 的 writeFile 不会自动创建父目录，
+// 首写根级文件（settings.json / library.json）前必须先创建 ROOT，否则写入失败。
+async function ensureRoot() {
+  try {
+    await Filesystem.mkdir({ path: ROOT, directory: APP_DIR, recursive: true });
+  } catch (e) {
+    if (e && !/exists|EEXIST|already/i.test(String(e.message || e))) throw e;
+  }
+}
+
 async function writeText(path, value) {
   const text = JSON.stringify(value, null, 2);
   if (isNative) {
+    await ensureRoot();
     await fsMkdir(path.split("/").slice(0, -1).join("/"));
     await Filesystem.writeFile({ path: `${ROOT}/${path}`, data: text, directory: APP_DIR, encoding: "utf8" });
   } else {

@@ -54,11 +54,6 @@ export function MobileHome({
 
   return (
     <div className="mobile-home">
-      <div className="m-statusbar">
-        <span>9:41</span>
-        <span className="m-battery" />
-      </div>
-
       <header className="m-appbar">
         <span className="m-brand">{onMe ? "设置" : "衣橱"}</span>
         <div className="m-appbar-actions">

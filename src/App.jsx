@@ -1016,8 +1016,8 @@ export function App() {
           )}
         </div>
 
-        <WardrobeImportFlow onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} triggerRef={importTriggerRef} />
       </div>
+      <WardrobeImportFlow onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} triggerRef={importTriggerRef} />
       <div className="mobile-mount">
         <MobileHome
           items={visibleItems}
