@@ -1,4 +1,6 @@
 import React from "react";
+import { TShirt, User, Plus, Gear, MagnifyingGlass } from "@phosphor-icons/react";
+import { SettingsPanel } from "./SettingsPanel.jsx";
 
 const CATEGORIES = [
   { id: "all", label: "全部" },
@@ -12,8 +14,8 @@ const CATEGORIES = [
 ];
 
 const TABS = [
-  { id: "wardrobe", label: "衣橱" },
-  { id: "me", label: "我的" },
+  { id: "wardrobe", label: "衣橱", Icon: TShirt },
+  { id: "me", label: "我的", Icon: User },
 ];
 
 const TYPE_LABEL = {
@@ -29,15 +31,19 @@ const TYPE_LABEL = {
 /**
  * 手机端首页（与 Ardot 设计稿 12:1 一致）。
  * 纯展示组件：传入 items 即可渲染，交互通过回调上抛。
+ * activeTab === "wardrobe" → 衣橱网格 + 顶部"导入"按钮
+ * activeTab === "me"      → SettingsPanel（设置：DashScope API Key / 参考图 / 模型选择）
  */
 export function MobileHome({
   items = [],
   activeCategory = "all",
   onSelectCategory,
   onOpenItem,
+  onImport,
   activeTab = "wardrobe",
   onSelectTab,
 }) {
+  const onMe = activeTab === "me";
   const grid = items.slice(0, 6).map((item) => ({
     id: item.id,
     name: item.name || "未命名",
@@ -54,92 +60,118 @@ export function MobileHome({
       </div>
 
       <header className="m-appbar">
-        <span className="m-brand">衣橱</span>
+        <span className="m-brand">{onMe ? "设置" : "衣橱"}</span>
         <div className="m-appbar-actions">
-          <button className="m-icon-btn" type="button" aria-label="搜索">
-            <span className="m-glyph">⌕</span>
+          {!onMe && (
+            <button
+              className="m-icon-btn"
+              type="button"
+              aria-label="导入单品"
+              onClick={() => onImport && onImport()}
+            >
+              <Plus size={18} weight="bold" aria-hidden="true" />
+            </button>
+          )}
+          <button
+            className="m-icon-btn"
+            type="button"
+            aria-label="搜索"
+          >
+            <MagnifyingGlass size={18} aria-hidden="true" />
           </button>
-          <div className="m-avatar">A</div>
+          <button
+            className={"m-icon-btn" + (onMe ? " active" : "")}
+            type="button"
+            aria-label="设置"
+            onClick={() => onSelectTab && onSelectTab(onMe ? "wardrobe" : "me")}
+            aria-pressed={onMe}
+          >
+            <Gear size={18} aria-hidden="true" />
+          </button>
         </div>
       </header>
 
-      <div className="m-search">
-        <span className="m-glyph">⌕</span>
-        <input placeholder="搜索单品、颜色、风格…" />
-      </div>
+      {!onMe && (
+        <>
+          <div className="m-search">
+            <MagnifyingGlass size={16} aria-hidden="true" />
+            <input placeholder="搜索单品、颜色、风格…" />
+          </div>
 
-      <nav className="m-chips">
-        {CATEGORIES.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            className={"m-chip" + (c.id === activeCategory ? " active" : "")}
-            onClick={() => onSelectCategory && onSelectCategory(c.id)}
-          >
-            {c.label}
-          </button>
-        ))}
-      </nav>
+          <nav className="m-chips" aria-label="按单品种类筛选">
+            {CATEGORIES.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={"m-chip" + (c.id === activeCategory ? " active" : "")}
+                onClick={() => onSelectCategory && onSelectCategory(c.id)}
+              >
+                {c.label}
+              </button>
+            ))}
+          </nav>
 
-      <section className="m-video-section">
-        <h2 className="m-section-label">穿搭视频</h2>
-        <div className="m-video-card">
-          <button className="m-play" type="button" aria-label="播放穿搭视频">
-            <span />
-          </button>
-          <span className="m-video-title">秋冬通勤 · 驼色风衣</span>
-          <span className="m-duration">0:42</span>
-        </div>
-      </section>
-
-      <section className="m-gallery-section">
-        <h2 className="m-section-label">我的衣橱</h2>
-        <div className="m-grid">
-          {grid.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="m-card"
-              onClick={() => onOpenItem && onOpenItem(item)}
-            >
-              <div
-                className="m-card-img"
-                style={
-                  item.image
-                    ? { backgroundImage: `url(${item.image})` }
-                    : undefined
-                }
-              />
-              <div className="m-card-info">
-                <div className="m-card-name">{item.name}</div>
-                <div className="m-card-row">
-                  <span className="m-card-type">{item.type}</span>
-                  <span className="m-swatches">
-                    {item.colors.map((c, i) => (
-                      <span
-                        className="m-swatch"
-                        key={i}
-                        style={{ background: c }}
-                      />
-                    ))}
-                  </span>
-                </div>
+          <section className="m-gallery-section">
+            <h2 className="m-section-label">我的衣橱</h2>
+            {grid.length === 0 ? (
+              <p className="m-empty-hint">点击右上角 + 导入你的第一件单品</p>
+            ) : (
+              <div className="m-grid">
+                {grid.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="m-card"
+                    onClick={() => onOpenItem && onOpenItem(item)}
+                  >
+                    <div
+                      className="m-card-img"
+                      style={
+                        item.image
+                          ? { backgroundImage: `url(${item.image})` }
+                          : undefined
+                      }
+                    />
+                    <div className="m-card-info">
+                      <div className="m-card-name">{item.name}</div>
+                      <div className="m-card-row">
+                        <span className="m-card-type">{item.type}</span>
+                        <span className="m-swatches">
+                          {item.colors.map((c, i) => (
+                            <span
+                              className="m-swatch"
+                              key={i}
+                              style={{ background: c }}
+                            />
+                          ))}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
               </div>
-            </button>
-          ))}
-        </div>
-      </section>
+            )}
+          </section>
+        </>
+      )}
 
-      <nav className="m-tabbar">
-        {TABS.map((t) => (
+      {onMe && (
+        <main className="m-settings-mount">
+          <SettingsPanel />
+        </main>
+      )}
+
+      <nav className="m-tabbar" aria-label="主导航">
+        {TABS.map(({ id, label, Icon }) => (
           <button
-            key={t.id}
+            key={id}
             type="button"
-            className={"m-tab" + (t.id === activeTab ? " active" : "")}
-            onClick={() => onSelectTab && onSelectTab(t.id)}
+            className={"m-tab" + (id === activeTab ? " active" : "")}
+            onClick={() => onSelectTab && onSelectTab(id)}
+            aria-pressed={id === activeTab}
           >
-            <span className="m-tab-icon" />
-            <span className="m-tab-label">{t.label}</span>
+            <Icon size={22} weight={id === activeTab ? "fill" : "regular"} aria-hidden="true" />
+            <span className="m-tab-label">{label}</span>
           </button>
         ))}
       </nav>

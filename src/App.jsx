@@ -1024,8 +1024,9 @@ export function App() {
           activeCategory={activeType}
           onSelectCategory={chooseType}
           onOpenItem={(it) => setSelectedId(it.id)}
-          activeTab="wardrobe"
-          onSelectTab={() => {}}
+          onImport={() => importTriggerRef.current?.click()}
+          activeTab={activeNav === "settings" ? "me" : "wardrobe"}
+          onSelectTab={(tabId) => setActiveNav(tabId === "me" ? "settings" : "wardrobe")}
         />
       </div>
     </>

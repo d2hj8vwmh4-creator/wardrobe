@@ -66,6 +66,7 @@
   align-items: center;
   justify-content: center;
 }
+.m-icon-btn.active { color: var(--m-primary); border-color: var(--m-primary); }
 .m-avatar {
   width: 32px;
   height: 32px;
@@ -251,17 +252,8 @@
   cursor: pointer;
 }
 .m-tab.active { color: var(--m-primary); }
-.m-tab-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 8px;
-  background: var(--m-surface);
-  border: 1px solid var(--m-border);
-}
-.m-tab.active .m-tab-icon {
-  background: var(--m-primary);
-  border-color: var(--m-primary);
-}
+/* 磷图图标直接作为子元素，color 跟随 .m-tab */
+.m-tab svg { display: block; }
 .m-tab-label { font-size: 12px; }
 .m-tab.active .m-tab-label { font-weight: 500; }
 
@@ -270,4 +262,21 @@
 @media (max-width: 639px) {
   .app-shell { display: none; }
   .mobile-mount { display: block; }
+}
+
+/* 空衣橱提示 */
+.m-empty-hint {
+  margin: 8px 16px 24px;
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--m-muted);
+  background: var(--m-surface);
+  border: 1px dashed var(--m-border);
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+/* 设置页挂载点：给底部 tabbar 留出安全间距 */
+.m-settings-mount {
+  padding: 8px 16px 80px;
 }
