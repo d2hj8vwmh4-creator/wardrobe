@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: read
+      contents: write
       issues: write
     steps:
       - name: Checkout 代码
@@ -123,3 +123,19 @@ jobs:
           name: wardrobe-app-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      # 自动发 GitHub Release：公开直链下载，免登录。固定 tag 覆盖更新，每次 push 刷新
+      - name: 发布到 GitHub Release（公开下载直链）
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          TAG="v-latest-apk"
+          # 删旧 release + tag（首次不存在则忽略）
+          gh release delete "$TAG" --cleanup-tag -y || true
+          gh release create "$TAG" "$APK" \
+            --title "网络衣橱 debug APK（latest）" \
+            --notes "自动构建的最新 debug APK。commit: ${{ github.sha }} / run #${{ github.run_number }}" \
+            --latest
+          echo "::notice::✅ 公开下载直链: https://github.com/${{ github.repository }}/releases/download/$TAG/app-debug.apk"
