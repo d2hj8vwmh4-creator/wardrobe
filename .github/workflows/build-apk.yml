@@ -32,10 +32,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: 接受许可并安装 SDK 包（云端有网，本机被墙不影响）
+      - name: 接受基础许可 + 安装通用包
         run: |
           yes | sdkmanager --licenses || true
-          sdkmanager "platforms;android-34" "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools"
+          sdkmanager "platform-tools" || true
 
       - name: 安装 npm 依赖
         run: npm install
@@ -45,6 +45,16 @@ jobs:
 
       - name: Capacitor 生成并同步安卓工程
         run: npx cap add android && npx cap sync android
+
+      # 关键：根据生成的 android/variables.gradle 的 compileSdkVersion 动态装对应 platform（避免硬编码漏装）
+      - name: 安装与 compileSdk 匹配的 Android 平台
+        run: |
+          yes | sdkmanager --licenses || true
+          SDK_VER=$(grep -oE 'compileSdkVersion\s*=\s*[0-9]+' android/variables.gradle | grep -oE '[0-9]+' | head -1)
+          echo "detected compileSdkVersion = $SDK_VER"
+          sdkmanager "platforms;android-${SDK_VER}" "build-tools;${SDK_VER}.0.0" || true
+          # 兜底：常见版本也装上，防止 build-tools 版本不匹配
+          sdkmanager "platforms;android-34" "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" || true
 
       # 真因捕获：gradle 失败时本步骤自己把日志建 Issue（公开仓库第三方可未登录读），再 exit 1
       - name: 构建 debug APK（失败时自建诊断 Issue）
@@ -70,9 +80,9 @@ jobs:
               ls -la android/app/build/outputs/apk/debug/ 2>&1 || echo "(no dir)"
               echo '```'
               echo ""
-              echo "### gradle wrapper 版本："
+              echo "### 已安装 SDK platforms："
               echo '```'
-              cat gradle/wrapper/gradle-wrapper.properties 2>&1 || echo "(no wrapper file)"
+              sdkmanager --list 2>/dev/null | grep -E 'platforms|build-tools' | head -20 || echo "(list failed)"
               echo '```'
             } > /tmp/err.md
             gh issue create --title "Android build failed #${{ github.run_number }}" --body-file /tmp/err.md || true
