@@ -10,9 +10,17 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node prod-server.mjs",
-    "check": "npm run build"
+    "check": "npm run build",
+    "cap:add": "cap add android",
+    "cap:sync": "cap sync android",
+    "cap:build": "cap build android"
   },
   "dependencies": {
+    "@capacitor-community/http": "^1.4.1",
+    "@capacitor/android": "^7.6.8",
+    "@capacitor/cli": "^7.6.8",
+    "@capacitor/core": "^7.6.8",
+    "@capacitor/filesystem": "^7.1.8",
     "@fontsource-variable/instrument-sans": "^5.2.8",
     "@phosphor-icons/react": "^2.1.10",
     "@unpic/react": "^1.0.2",

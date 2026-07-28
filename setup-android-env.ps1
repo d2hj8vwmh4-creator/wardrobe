@@ -17,6 +17,14 @@
    5. 把 %ANDROID_HOME%\platform-tools 加到 PATH
 
  运行：在本文件所在目录（wardrobe/）右键 → 使用 PowerShell 运行
+
+ 小米 / 澎湃 OS 用户特别注意（装第三方 APK 授权）：
+   1. 把生成的 app-debug.apk 传到手机，用「文件管理」找到并点击。
+   2. 若提示风险/禁止安装：设置 → 隐私保护 → 特殊权限设置 → 安装未知应用
+      → 给「文件管理」(或微信/浏览器) 开启权限，返回重试。
+   3. 首次打开 App 会请求存储权限，务必点「允许」（本地衣橱数据靠它）。
+   4. 建议再到：设置 → 应用设置 → 应用管理 → 网络衣橱 → 自启动/省电策略
+      设为允许/无限制，避免后台被系统回收导致存储或 AI 请求中断。
 #>
 
 $ErrorActionPreference = "Stop"
@@ -79,11 +87,13 @@ if (-not (Test-Path dist/index.html)) { Write-Output "build 失败，未生成 d
 
 # ---------- 5. Capacitor 生成安卓工程 ----------
 Write-Output "`n[5/6] Capacitor 生成安卓工程 ..."
-if (-not (Test-Path android)) {
-  npx cap add android
-} else {
-  Write-Output "    android/ 已存在，跳过 cap add"
+# 若已存在 android/（可能是包名不符的旧工程），先删除再重新生成，
+# 确保生成的原生工程包名与 capacitor.config.json 完全一致（com.wardrobe.app）。
+if (Test-Path android) {
+  Write-Output "    检测到旧的 android/ 工程，删除并重新生成（确保包名 = com.wardrobe.app）"
+  Remove-Item android -Recurse -Force -ErrorAction SilentlyContinue
 }
+npx cap add android
 # 把 Gradle 分发源换成腾讯云镜像（国内可达，否则从官方下 gradle 会卡住）
 $wrapper = "android/gradle/wrapper/gradle-wrapper.properties"
 if (Test-Path $wrapper) {

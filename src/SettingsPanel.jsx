@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Gear, Key, Link, Monitor, SpinnerGap, Upload, User, Warning, X } from "@phosphor-icons/react";
+import { appApi } from "./lib/api.js";
 
 const PROVIDERS = [
   { id: "qwen", label: "通义千问（Qwen）" },
@@ -135,12 +136,10 @@ export function SettingsPanel() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [sRes, rRes] = await Promise.all([
-        fetch("/api/import/settings", { cache: "no-store" }),
-        fetch("/api/import/settings/reference", { cache: "no-store" }),
+      const [s, rRes] = await Promise.all([
+        appApi.getSettings(),
+        appApi.getReference(),
       ]);
-      if (!sRes.ok) throw new Error("无法加载设置");
-      const s = await sRes.json();
       setSettings(s);
       setProvider(s.provider || "qwen");
       setVisionModel(s.visionModel || "");
@@ -149,7 +148,7 @@ export function SettingsPanel() {
       setImageQuality(s.imageQuality || "high");
       setVisionBaseUrl(s.visionBaseUrl || "");
       setImageBaseUrl(s.imageBaseUrl || "");
-      if (rRes.ok) setReference(await rRes.json());
+      setReference(rRes);
     } catch (err) {
       flash("error", err.message || "加载失败");
     } finally {
@@ -175,13 +174,7 @@ export function SettingsPanel() {
         imageBaseUrl: imageBaseUrl.trim(),
       };
       if (apiKeyChanged) bodyPayload.apiKey = apiKey;
-      const res = await fetch("/api/import/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bodyPayload),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "保存失败");
+      const data = await appApi.saveSettings(bodyPayload);
       setSettings(data);
       setApiKeyChanged(false);
       setApiKey("");
@@ -197,13 +190,7 @@ export function SettingsPanel() {
     if (!window.confirm("确定清除运行时覆盖层，恢复 .env 中的默认设置？")) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/import/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reset: true }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "重置失败");
+      const data = await appApi.resetSettings();
       setSettings(data);
       setProvider(data.provider || "qwen");
       setVisionModel(data.visionModel || "");
@@ -229,13 +216,7 @@ export function SettingsPanel() {
     reader.onload = async () => {
       try {
         setSaving(true);
-        const res = await fetch("/api/import/settings/reference", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageDataUrl: reader.result }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "上传失败");
+        const data = await appApi.saveReference(reader.result);
         setSettings(data);
         setReference({ hasReference: true, url: reader.result });
         flash("ok", "人体参考图已更新");

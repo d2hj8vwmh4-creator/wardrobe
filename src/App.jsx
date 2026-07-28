@@ -4,6 +4,7 @@ import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { MobileHome } from "./MobileHome.jsx";
 import { SettingsPanel } from "./SettingsPanel.jsx";
+import { appApi, isNative } from "./lib/api.js";
 
 const STORAGE_KEY = "open-wardrobe-edits-v1";
 const DELETED_STORAGE_KEY = "open-wardrobe-deleted-v1";
@@ -635,11 +636,7 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
-    fetch("/api/import/wardrobe", { cache: "no-store" })
-      .then((response) => {
-        if (!response.ok) throw new Error("无法加载衣橱。");
-        return response.json();
-      })
+    appApi.listWardrobe()
       .then((loadedItems) => {
         const edits = readEdits();
         const deleted = readDeletedItems();
@@ -685,8 +682,7 @@ export function App() {
   const deleteItem = async (id) => {
     if (id.startsWith("import-")) {
       try {
-        const response = await fetch(`/api/import/wardrobe/${id}`, { method: "DELETE" });
-        if (!response.ok && response.status !== 404) throw new Error("无法删除已导入的单品。");
+        await appApi.deleteWardrobeItem(id);
       } catch (requestError) {
         setError(requestError.message);
         return;
@@ -724,30 +720,19 @@ export function App() {
   const generateOutfit = useCallback(async () => {
     if (selectedOutfitIds.length < 1) return;
     const chosen = items.filter((item) => selectedOutfitIds.includes(item.id));
-    const garmentAssetUrls = chosen.map((item) => item.image);
+    const params = isNative ? chosen.map((item) => item.id) : chosen.map((item) => item.image);
     setOutfitLoading(true);
     setOutfitError("");
     setOutfitResult(null);
     setOutfitIsStitch(false);
     try {
-      const response = await fetch("/api/import/outfit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ garmentAssetUrls, prompt: outfitPrompt.trim() || undefined }),
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        const rawMessage = data.detail || data.error || `生成失败 (${response.status})`;
-        let friendly = rawMessage;
-        if (/overdue-payment|Access denied|good standing|insufficient/i.test(rawMessage)) {
-          friendly = "千问账号状态异常或欠费，无法生成图像。请到阿里云百炼控制台确认账户余额/状态后重试。";
-        }
-        throw new Error(friendly);
-      }
-      const data = await response.json();
+      const data = await appApi.createOutfit(params, outfitPrompt.trim() || undefined);
       setOutfitResult(data.imageUrl);
     } catch (requestError) {
-      setOutfitError(requestError.message);
+      const raw = requestError?.message || "生成失败";
+      setOutfitError(/overdue-payment|Access denied|good standing|insufficient/i.test(raw)
+        ? "千问账号状态异常或欠费，无法生成图像。请到阿里云百炼控制台确认账户余额/状态后重试。"
+        : raw);
     } finally {
       setOutfitLoading(false);
     }

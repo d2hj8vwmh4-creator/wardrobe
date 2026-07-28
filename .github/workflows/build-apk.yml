@@ -1,0 +1,55 @@
+name: Build Android APK
+
+# 触发：推送到 main/master 分支，或手动在 Actions 页面点 Run workflow
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 云端自动装 Android cmdline-tools 并设置 ANDROID_HOME
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 接受许可并安装 SDK 包（云端有网，本机被墙不影响）
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-34" "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools"
+
+      - name: 安装 npm 依赖
+        run: npm install
+
+      - name: 构建前端 web 包
+        run: npm run build
+
+      - name: Capacitor 生成并同步安卓工程
+        run: npx cap add android && npx cap sync android
+
+      - name: 构建 debug APK
+        run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        env:
+          GRADLE_OPTS: "-Xmx2048m"
+
+      - name: 上传 APK 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: wardrobe-app-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk

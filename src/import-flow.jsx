@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowCounterClockwise, Check, Plus, SpinnerGap, Trash, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import "./import-flow.css";
+import { appApi, isNative } from "./lib/api.js";
 
-const API = "/api/import/jobs";
-const CONFIG_API = "/api/import/config";
 const PARTS = [
   ["upperbody", "上衣"],
   ["wholebody_up", "外套"],
@@ -21,16 +20,6 @@ const fileToDataUrl = (file) => new Promise((resolve, reject) => {
   reader.onerror = () => reject(reader.error || new Error("无法读取该图片。"));
   reader.readAsDataURL(file);
 });
-
-async function api(path, options) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options?.headers || {}) },
-  });
-  const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(value.error || "导入任务无法更新。");
-  return value;
-}
 
 function deriveStatus(job) {
   const crop = job.stages?.crop;
@@ -159,8 +148,8 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
   const [setup, setSetup] = useState(null);
 
   useEffect(() => {
-    api(CONFIG_API).then(setSetup).catch((requestError) => setSetup({ ready: false, error: requestError.message }));
-    api(API)
+    appApi.config().then(setSetup).catch((requestError) => setSetup({ ready: false, error: requestError.message }));
+    appApi.listJobs()
       .then((storedJobs) => {
         const visibleJobs = storedJobs.filter((job) => job.status !== "complete" && job.stages?.crop?.status !== "rejected" && job.stages?.garment?.status !== "rejected" && job.stages?.modeled?.status !== "rejected");
         setJobs(visibleJobs);
@@ -171,7 +160,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
 
   const refresh = useCallback(async (id) => {
     try {
-      const next = await api(`${API}/${id}`);
+      const next = await appApi.getJob(id);
       setJobs((current) => current.map((job) => job.id === id ? next : job));
       setDrafts((current) => current[id] ? current : { ...current, [id]: defaultDraft(next) });
     } catch (requestError) { setError(requestError.message); }
@@ -191,7 +180,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     for (const file of images) {
       try {
         const imageDataUrl = await fileToDataUrl(file);
-        const result = await api(API, { method: "POST", body: JSON.stringify({ imageDataUrl, metadata: { name: file.name.replace(/\.[^.]+$/, "") } }) });
+        const result = await appApi.createJobs(imageDataUrl, { name: file.name.replace(/\.[^.]+$/, "") });
         const createdJobs = result.jobs || [result];
         if (!createdJobs.length && result.noClothingDetected) {
           setNotice({ tone: "complete", text: "未检测到衣物", detail: `我们在 ${file.name} 中未能找到明确的穿戴单品。请尝试更清晰或取景更紧凑的图片。` });
@@ -221,17 +210,17 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
       if (stage === "garment" && action === "approve") {
         const draft = drafts[job.id];
         const metadata = { ...draft, secondaryColor: draft.secondaryColor || null, tags: draft.tags.split(",").map((tag) => tag.trim()).filter(Boolean) };
-        await api(`${API}/${job.id}/metadata`, { method: "PATCH", body: JSON.stringify({ metadata }) });
-        const updated = await api(`${API}/${job.id}/stages/garment/approve`, { method: "POST" });
-        const garmentPath = `/api/import/library/import-${job.id}-garment.png`;
-        onGarmentApproved?.({ id: `import-${job.id}`, ...metadata, image: garmentPath, thumbnail: garmentPath, modeledImage: null, palette: [metadata.color, metadata.secondaryColor].filter(Boolean), importJobId: job.id });
+        await appApi.patchMetadata(job.id, metadata);
+        const updated = await appApi.stageAction(job.id, "garment", "approve");
+        const garmentAssetUrl = isNative ? updated.stages.garment.assetUrl : `/api/import/library/import-${job.id}-garment.png`;
+        onGarmentApproved?.({ id: `import-${job.id}`, ...metadata, image: garmentAssetUrl, thumbnail: garmentAssetUrl, modeledImage: null, palette: [metadata.color, metadata.secondaryColor].filter(Boolean), importJobId: job.id });
         setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
       } else if (stage === "garment" && action === "generate-modeled") {
         // 手动触发「生成上身效果图」（可选），调 modeled regenerate → modeled 进入 processing → review
-        const updated = await api(`${API}/${job.id}/stages/modeled/regenerate`, { method: "POST", body: JSON.stringify({ prompt }) });
+        const updated = await appApi.stageAction(job.id, "modeled", "regenerate", prompt);
         setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
       } else {
-        const updated = await api(`${API}/${job.id}/stages/${stage}/${action}`, { method: "POST", body: action === "regenerate" ? JSON.stringify({ prompt }) : undefined });
+        const updated = await appApi.stageAction(job.id, stage, action, prompt);
         const removeFromQueue = action === "reject" || (stage === "modeled" && action === "approve");
         const remainingJobs = removeFromQueue ? jobs.filter((item) => item.id !== job.id) : null;
         setJobs((current) => removeFromQueue ? current.filter((item) => item.id !== job.id) : current.map((item) => item.id === job.id ? updated : item));
@@ -241,7 +230,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
           if (!remainingJobs.length) setOpen(false);
         }
         if (action === "regenerate") setRegenerationPrompts((current) => ({ ...current, [`${job.id}:${stage}`]: "" }));
-        if (stage === "modeled" && action === "approve") onModeledApproved?.(job.id, `/api/import/library/import-${job.id}-modeled.png`);
+        if (stage === "modeled" && action === "approve") onModeledApproved?.(job.id, isNative ? updated.stages.modeled.assetUrl : `/api/import/library/import-${job.id}-modeled.png`);
       }
     } catch (requestError) { setError(requestError.message); }
     finally { setBusyId(null); }
@@ -251,7 +240,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     setBusyId(job.id); setError("");
     try {
       const tolerance = requestedTolerance ?? cleanupTolerances[job.id] ?? job.stages?.garment?.cleanupTolerance ?? 46;
-      const updated = await api(`${API}/${job.id}/stages/garment/cleanup-${action}`, { method: "POST", body: JSON.stringify({ tolerance }) });
+      const updated = await appApi.cleanup(job.id, action, tolerance);
       setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
       setCleanupTolerances((current) => ({ ...current, [job.id]: updated.stages?.garment?.cleanupTolerance ?? tolerance }));
       setSelectedReviewId(job.id);
@@ -262,7 +251,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
   const deleteJob = async (job) => {
     setBusyId(job.id); setError("");
     try {
-      await api(`${API}/${job.id}`, { method: "DELETE" });
+      await appApi.deleteJob(job.id);
       const remaining = jobs.filter((item) => item.id !== job.id);
       setJobs(remaining);
       setDrafts((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== job.id)));
