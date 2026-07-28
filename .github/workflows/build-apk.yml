@@ -46,6 +46,15 @@ jobs:
       - name: Capacitor 生成并同步安卓工程
         run: npx cap add android && npx cap sync android
 
+      # 修正包名：Capacitor 7 的 cap add/sync 不会把 capacitor.config.json 的 appId 写进 app/build.gradle，需手动同步
+      - name: 修正 Android 包名为配置的 appId
+        run: |
+          APP_ID=$(node -e "console.log(require('./capacitor.config.json').appId)")
+          echo "target appId = $APP_ID"
+          sed -i "s/namespace = \"com.getcapacitor.myapp\"/namespace = \"$APP_ID\"/" android/app/build.gradle
+          sed -i "s/applicationId \"com.getcapacitor.app\"/applicationId \"$APP_ID\"/" android/app/build.gradle
+          grep -E "namespace|applicationId" android/app/build.gradle
+
       # 关键：根据生成的 android/variables.gradle 的 compileSdkVersion 动态装对应 platform（避免硬编码漏装）
       - name: 安装与 compileSdk 匹配的 Android 平台
         run: |
