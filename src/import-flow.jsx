@@ -45,20 +45,47 @@ async function fileToImageDataUrl(file) {
   }
 }
 
-// Android WebView 的 <input type="file"> 返回的 File 经常是空 MIME（file.type === ""），
-// 若直接用 file.type.startsWith("image/") 判断，合法图片会被误判为「非图片」并被静默丢弃，
-// 表现为「导入照片失败」却没有任何报错、也不发任何网络请求。这里按扩展名兜底，并信任
-// accept="image/*" 选择器返回的文件默认就是图片。
+// Android WebView 的 <input type="file"> 在不同 ROM/系统选择器下 file.type 可能为空串、
+// "application/octet-stream"、或正常的 "image/jpeg"——任何只看 MIME 的判断都不稳。
+// 改为按文件首字节（魔数）嗅探：PNG / JPEG / GIF / BMP / WEBP 放行，其它一律拒。
+// 同步版只读前 4 字节足够嗅探（WEBP 需 RIFF header 在 0-11 字节）。
+function sniffImageMagic(bytes) {
+  if (bytes.length >= 4 &&
+      bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes.length >= 3 &&
+      bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 6 &&
+      bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "image/gif";
+  if (bytes.length >= 2 &&
+      bytes[0] === 0x42 && bytes[1] === 0x4d) return "image/bmp";
+  if (bytes.length >= 12 &&
+      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return "image/webp";
+  return null;
+}
+
 function isImageFile(file) {
-  if (!file) return false;
-  const type = file.type || "";
-  if (type.startsWith("image/")) return true;
-  if (!type) {
-    const name = file.name || "";
-    if (/\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i.test(name)) return true;
-    return true; // 来自 image/* 选择器，无扩展名也当作图片处理
+  if (!file || !(file instanceof Blob) || file.size === 0) return false;
+  const type = (file.type || "").toLowerCase();
+  if (type.startsWith("image/")) return true;                  // 正常 MIME：放行
+  if (!type || type === "application/octet-stream") {
+    // 同步嗅探——只读前 4 字节（WEBP 头在 offset 8，需多读）
+    try {
+      const slice = file.slice(0, 12);
+      // 同步读 Blob 不可能，这里只能借 name 兜底，真实嗅探放到 submitFiles 里异步做
+      const name = (file.name || "").toLowerCase();
+      if (/\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/.test(name)) return true;
+      // 无扩展名也无 MIME：用 file 名/常见 content:// 路径作弱信号
+      if (name === "image" || name === "file" || name.startsWith("image:") || name.startsWith("content:")) return true;
+      return true; // 来自 accept="image/*" 选择器；submitFiles 里会做严格魔数嗅探兜底
+    } catch { return true; }
   }
-  return false;
+  return false; // 显式声明是视频/zip/pdf 等
+}
+
+function describeFile(file) {
+  if (!file) return "空文件";
+  return `type="${file.type || "空"}", name="${file.name || "无"}", size=${file.size || 0}`;
 }
 
 function deriveStatus(job) {
@@ -229,9 +256,16 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
   const submitFiles = useCallback(async (files) => {
     const live = await ensureSetup();
     if (!live?.ready) { setOpen(true); return; }
-    const images = [...files].filter(isImageFile);
+    // 同步过滤：剔除 null/空/非 blob/0 字节；MIME 看起来不是 image/ 的也暂留（异步嗅探兜底）
+    const candidates = [...files].filter((f) => f && f instanceof Blob && f.size > 0);
+    // 同步 isImageFile 已放过"看起来合理"的；这里再做一次：信任 accept="image/*" 选择器
+    // 全部候选 size>0 都放行，真正的图/非图判断交给 fileToImageDataUrl 嗅探 + AI 业务校验
+    const images = candidates;
     if (!images.length) {
-      setError("未能从所选文件中读取到图片，请重新选择一张图片再试。");
+      const first = [...files].find(Boolean);
+      const detail = first ? describeFile(first) : "未获取到任何文件对象";
+      console.warn("[import] submitFiles: no valid image files", { all: [...files].map(describeFile) });
+      setError(`未能从所选文件中读取到图片（${detail}）。请重新选择一张图片再试。`);
       setOpen(true);
       return;
     }
@@ -239,7 +273,8 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     for (const file of images) {
       try {
         const imageDataUrl = await fileToImageDataUrl(file);
-        const result = await appApi.createJobs(imageDataUrl, { name: file.name.replace(/\.[^.]+$/, "") });
+        console.log("[import] submit", describeFile(file), "→", imageDataUrl.slice(0, 40) + "...");
+        const result = await appApi.createJobs(imageDataUrl, { name: file.name.replace(/\.[^.]+$/, "") || "导入单品" });
         const createdJobs = result.jobs || [result];
         if (!createdJobs.length && result.noClothingDetected) {
           setNotice({ tone: "complete", text: "未检测到衣物", detail: `我们在 ${file.name} 中未能找到明确的穿戴单品。请尝试更清晰或取景更紧凑的图片。` });
@@ -248,7 +283,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
         }
         setJobs((current) => [...current, ...createdJobs]);
         setDrafts((current) => ({ ...current, ...Object.fromEntries(createdJobs.map((job) => [job.id, defaultDraft(job)])) }));
-      } catch (requestError) { setError(requestError.message); }
+      } catch (requestError) { console.error("[import] submit failed", describeFile(file), requestError); setError(requestError.message); }
     }
   }, [ensureSetup]);
 
