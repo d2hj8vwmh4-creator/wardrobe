@@ -1,10 +1,13 @@
 // 本地存储层（替代后端 data/ 目录的文件系统）。
-// native（Capacitor）写入 Capacitor Filesystem（Application 目录）；web 降级用 localStorage + 内存 blob。
+// native（Capacitor）写入 Capacitor Filesystem（DATA 目录 = 应用私有 filesDir）；web 降级用 localStorage + 内存 blob。
 import { isNative, blobToBase64, base64ToBlob } from "./env.js";
-import { Filesystem } from "@capacitor/filesystem";
+import { Filesystem, Directory } from "@capacitor/filesystem";
 
 const ROOT = "wardrobe";
-const APP_DIR = "APPLICATION";
+// 注意：必须使用 Capacitor Filesystem 的合法 Directory 枚举值。
+// "APPLICATION" 不是合法值，在 Android 上 getDirectory() 会返回 null，导致所有写入/读取静默失败。
+// Directory.DATA 映射到应用私有 filesDir（c.filesDir），卸载前持久化，符合原本意图。
+const APP_DIR = Directory.DATA;
 
 const memBlobs = new Map(); // name -> Blob (web 降级)
 const urlCache = new Map(); // name -> objectURL
