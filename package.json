@@ -16,7 +16,6 @@
     "cap:build": "cap build android"
   },
   "dependencies": {
-    "@capacitor-community/http": "^1.4.1",
     "@capacitor/android": "^7.6.8",
     "@capacitor/cli": "^7.6.8",
     "@capacitor/core": "^7.6.8",

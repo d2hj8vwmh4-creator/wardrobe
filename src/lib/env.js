@@ -12,11 +12,17 @@ export const DEFAULT_SETTINGS = {
   imageModel: "wan2.7-image",
   garmentModel: "",
   imageQuality: "high",
-  visionBaseUrl: "https://dashscope.aliyun.com/compatible-mode/v1",
+  visionBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
   imageBaseUrl: "https://dashscope.aliyuncs.com",
   apiKey: "",
   modelReference: "model-reference.png",
 };
+
+// 自愈：历史版本默认值误写为 dashscope.aliyun.com（正确域名是 dashscope.aliyuncs.com），
+// 且已持久化进用户 settings.json。读取时静默纠正，用户下次保存自动落正确值。
+function healDashscopeHost(url) {
+  return typeof url === "string" ? url.replace("//dashscope.aliyun.com", "//dashscope.aliyuncs.com") : url;
+}
 
 export function resolveSettings(runtime = {}) {
   const merged = { ...DEFAULT_SETTINGS, ...(runtime || {}) };
@@ -24,6 +30,8 @@ export function resolveSettings(runtime = {}) {
   if (!merged.imageModel) merged.imageModel = DEFAULT_SETTINGS.imageModel;
   if (!merged.imageBaseUrl) merged.imageBaseUrl = DEFAULT_SETTINGS.imageBaseUrl;
   if (!merged.visionBaseUrl) merged.visionBaseUrl = DEFAULT_SETTINGS.visionBaseUrl;
+  merged.visionBaseUrl = healDashscopeHost(merged.visionBaseUrl);
+  merged.imageBaseUrl = healDashscopeHost(merged.imageBaseUrl);
   return merged;
 }
 
