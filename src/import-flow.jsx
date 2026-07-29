@@ -21,6 +21,22 @@ const fileToDataUrl = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+// Android WebView 的 <input type="file"> 返回的 File 经常是空 MIME（file.type === ""），
+// 若直接用 file.type.startsWith("image/") 判断，合法图片会被误判为「非图片」并被静默丢弃，
+// 表现为「导入照片失败」却没有任何报错、也不发任何网络请求。这里按扩展名兜底，并信任
+// accept="image/*" 选择器返回的文件默认就是图片。
+function isImageFile(file) {
+  if (!file) return false;
+  const type = file.type || "";
+  if (type.startsWith("image/")) return true;
+  if (!type) {
+    const name = file.name || "";
+    if (/\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i.test(name)) return true;
+    return true; // 来自 image/* 选择器，无扩展名也当作图片处理
+  }
+  return false;
+}
+
 function deriveStatus(job) {
   const crop = job.stages?.crop;
   const garment = job.stages?.garment;
@@ -189,8 +205,12 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
   const submitFiles = useCallback(async (files) => {
     const live = await ensureSetup();
     if (!live?.ready) { setOpen(true); return; }
-    const images = [...files].filter((file) => file.type.startsWith("image/"));
-    if (!images.length) return;
+    const images = [...files].filter(isImageFile);
+    if (!images.length) {
+      setError("未能从所选文件中读取到图片，请重新选择一张图片再试。");
+      setOpen(true);
+      return;
+    }
     setDragging(false); setError(""); setNotice(null);
     for (const file of images) {
       try {
@@ -214,7 +234,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     const onDragOver = (event) => { if ([...event.dataTransfer.types].includes("Files")) event.preventDefault(); };
     const onDragLeave = (event) => { event.preventDefault(); depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
     const onDrop = (event) => { event.preventDefault(); depth = 0; setDragging(false); submitFiles(event.dataTransfer.files); };
-    const onPaste = (event) => { const files = [...event.clipboardData.files]; if (files.some((file) => file.type.startsWith("image/"))) { event.preventDefault(); submitFiles(files); } };
+    const onPaste = (event) => { const files = [...event.clipboardData.files]; if (files.some(isImageFile)) { event.preventDefault(); submitFiles(files); } };
     window.addEventListener("dragenter", onDragEnter); window.addEventListener("dragover", onDragOver); window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop); window.addEventListener("paste", onPaste);
     return () => { window.removeEventListener("dragenter", onDragEnter); window.removeEventListener("dragover", onDragOver); window.removeEventListener("dragleave", onDragLeave); window.removeEventListener("drop", onDrop); window.removeEventListener("paste", onPaste); };
   }, [submitFiles]);
