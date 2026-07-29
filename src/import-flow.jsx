@@ -172,8 +172,23 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     return () => clearInterval(timer);
   }, [jobs, refresh]);
 
+  // 始终实时校验设置就绪状态，避免「保存设置后未重启 App」导致 setup 仍为旧的 ready:false，
+  // 从而把导入错误地拦截在 setup 守卫处（并弹出误导性的「请在 .env 中添加密钥」提示）。
+  const ensureSetup = useCallback(async () => {
+    try {
+      const live = await appApi.config();
+      setSetup(live);
+      return live;
+    } catch (requestError) {
+      const fallback = { ready: false, error: requestError?.message };
+      setSetup(fallback);
+      return fallback;
+    }
+  }, []);
+
   const submitFiles = useCallback(async (files) => {
-    if (!setup?.ready) { setOpen(true); return; }
+    const live = await ensureSetup();
+    if (!live?.ready) { setOpen(true); return; }
     const images = [...files].filter((file) => file.type.startsWith("image/"));
     if (!images.length) return;
     setDragging(false); setError(""); setNotice(null);
@@ -191,7 +206,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
         setDrafts((current) => ({ ...current, ...Object.fromEntries(createdJobs.map((job) => [job.id, defaultDraft(job)])) }));
       } catch (requestError) { setError(requestError.message); }
     }
-  }, [setup]);
+  }, [ensureSetup]);
 
   useEffect(() => {
     let depth = 0;
@@ -278,7 +293,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
       <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { submitFiles(event.target.files); event.target.value = ""; }} />
       <div className="import-drop-overlay" data-active={dragging && !setupRequired} aria-hidden={!dragging || setupRequired}><div className="import-drop-target is-over"><UploadSimple size={34} weight="light" /><h2>拖入衣物图片</h2><p>单件单品或整套穿搭照片均可。你的衣橱将保持在原处不被改动。</p></div></div>
       <aside className={`import-tray${hasImportActivity ? " is-expanded" : ""}`} aria-label="衣橱导入">
-        <button className="import-tray__button" type="button" onClick={() => setupRequired || hasImportActivity ? setOpen(true) : inputRef.current?.click()} aria-label={setupRequired ? "打开设置说明" : hasImportActivity ? "打开导入进度" : "添加衣物"}>{activeStatus?.tone === "processing" ? <SpinnerGap size={19} className="import-spinner" /> : activeStatus?.tone === "error" ? <WarningCircle size={19} /> : readyCount ? <span>{readyCount}</span> : notice ? <X size={18} /> : <Plus size={19} />}</button>
+        <button className="import-tray__button" type="button" onClick={async () => { const live = await ensureSetup(); if (!live?.ready || hasImportActivity) setOpen(true); else inputRef.current?.click(); }} aria-label={setupRequired ? "打开设置说明" : hasImportActivity ? "打开导入进度" : "添加衣物"}>{activeStatus?.tone === "processing" ? <SpinnerGap size={19} className="import-spinner" /> : activeStatus?.tone === "error" ? <WarningCircle size={19} /> : readyCount ? <span>{readyCount}</span> : notice ? <X size={18} /> : <Plus size={19} />}</button>
         <div className="import-tray__actions">{active && <img className="import-tray__preview" src={active.stages?.garment?.assetUrl || active.stages?.garment?.failedAssetUrl || active.stages?.crop?.assetUrl || active.originalAssetUrl} alt="" />}<span className="import-tray__label">{activeStatus?.text || "添加衣物"}</span>{!setupRequired && <button className="import-icon-button" type="button" onClick={() => inputRef.current?.click()} aria-label="选择图片"><UploadSimple size={17} /></button>}</div>
       </aside>
       <div className="import-popover-backdrop" data-open={open} onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
