@@ -2,15 +2,16 @@
 // native（Capacitor）写入 Capacitor Filesystem（Directory.DATA = 应用私有 filesDir）；
 // web 降级用 localStorage + 内存 blob。
 //
-// 【根因修复】Capacitor 7 Android 的 ION 控制器在 Directory.DATA 下无法为嵌套路径
-// 创建父目录（"Missing parent directory – possibly recursive=false was passed or
-// parent directory creation failed."）。即便 writeFile 显式 recursive:true，mkdir
-// recursive:true，ION 在 DATA 下都建不出第一级以外的子目录。
+// 【根因修复】Capacitor 7 Android 的 ION 控制器在 Directory.DATA 下，
+// 任何 writeFile 即便只写根目录文件，只要 recursive=true 就会触发父目录
+// 创建并失败："Missing parent directory – parent directory creation failed."
+// (OS-PLUG-FILE-0011)。这与路径嵌套无关——根级 settings.json 同样失败。
 //
-// filesDir 由系统保证存在，所以把所有文件平铺到 DATA 根，从根本上绕开该 bug：
-// 不再依赖任何 mkdir / 父目录创建。内部仍用 "/" 表示逻辑层级（如
-// "jobs/<id>/job.json"、"<id>/garment.png"），通过 diskName() 把 "/" 编码为 "__"
-// 得到安全的平铺文件名（jobId 为 UUID 不含 "_"，文件名不含 "__"，零冲突）。
+// filesDir 由系统保证存在，根本不需要建父目录，所以：
+// 1) 不传 recursive（默认 false，存在父目录时直接写入）
+// 2) 所有文件平铺到 DATA 根（diskName 把 "/" 编码为 "__"）
+//
+// 平铺的另一个好处：即便未来 ION 修好递归，零嵌套也避免任何潜在父目录坑。
 import { isNative, blobToBase64, base64ToBlob } from "./env.js";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 
@@ -29,7 +30,6 @@ async function writeText(path, value) {
       data: text,
       directory: APP_DIR,
       encoding: "utf8",
-      recursive: true,
     });
   } else {
     try { localStorage.setItem(`wardrobe:${path}`, text); } catch { /* ignore quota */ }
@@ -59,7 +59,6 @@ export async function writeImage(name, blob) {
       data: b64,
       directory: APP_DIR,
       encoding: "base64",
-      recursive: true,
     });
   } else {
     memBlobs.set(name, blob);
