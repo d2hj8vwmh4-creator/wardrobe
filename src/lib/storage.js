@@ -1,5 +1,11 @@
 // 本地存储层（替代后端 data/ 目录的文件系统）。
 // native（Capacitor）写入 Capacitor Filesystem（DATA 目录 = 应用私有 filesDir）；web 降级用 localStorage + 内存 blob。
+//
+// 关键设计：所有写入走 writeFile 并显式传 recursive:true，
+// 让插件自身创建父目录。Capacitor 7 Android 的 ION 控制器下，单独 mkdir 偶发报
+// "Missing parent directory – possibly recursive=false was passed or parent directory creation failed."，
+// 但 writeFile 在 createFileRecursive=true 时能可靠地建出整条路径。
+// 因此我们不再依赖独立的 mkdir 兜底，而是把"建目录"完全交给 writeFile 完成。
 import { isNative, blobToBase64, base64ToBlob } from "./env.js";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 
@@ -12,31 +18,31 @@ const APP_DIR = Directory.DATA;
 const memBlobs = new Map(); // name -> Blob (web 降级)
 const urlCache = new Map(); // name -> objectURL
 
+// 把 mkdir 当作"幂等兜底"：成功/已存在都视为 OK；不可恢复错误才抛出。
+// 由于上面的设计，写入实际不依赖此函数，但保留它对将来引入 listDirectory 等只读枚举有用。
 async function fsMkdir(path) {
   if (!path) return;
   try {
     await Filesystem.mkdir({ path: `${ROOT}/${path}`, directory: APP_DIR, recursive: true });
   } catch (e) {
-    if (e && !/exists|EEXIST|already/i.test(String(e.message || e))) throw e;
-  }
-}
-
-// 确保根目录存在：Android Filesystem 的 writeFile 不会自动创建父目录，
-// 首写根级文件（settings.json / library.json）前必须先创建 ROOT，否则写入失败。
-async function ensureRoot() {
-  try {
-    await Filesystem.mkdir({ path: ROOT, directory: APP_DIR, recursive: true });
-  } catch (e) {
-    if (e && !/exists|EEXIST|already/i.test(String(e.message || e))) throw e;
+    const msg = String(e?.message || e);
+    // 已存在或父目录已就绪 → 当作成功
+    if (/exists|EEXIST|already|Missing parent/i.test(msg)) return;
+    throw e;
   }
 }
 
 async function writeText(path, value) {
   const text = JSON.stringify(value, null, 2);
   if (isNative) {
-    await ensureRoot();
-    await fsMkdir(path.split("/").slice(0, -1).join("/"));
-    await Filesystem.writeFile({ path: `${ROOT}/${path}`, data: text, directory: APP_DIR, encoding: "utf8" });
+    // recursive:true → 插件自动建 wardrobe/ 及中间层；省掉独立 mkdir
+    await Filesystem.writeFile({
+      path: `${ROOT}/${path}`,
+      data: text,
+      directory: APP_DIR,
+      encoding: "utf8",
+      recursive: true,
+    });
   } else {
     try { localStorage.setItem(`wardrobe:${path}`, text); } catch { /* ignore quota */ }
   }
@@ -48,7 +54,8 @@ async function readText(path) {
       const r = await Filesystem.readFile({ path: `${ROOT}/${path}`, directory: APP_DIR, encoding: "utf8" });
       return JSON.parse(r.data);
     } catch (e) {
-      if (/ENOENT|does not exist|not found/i.test(String(e.message || e))) return null;
+      const msg = String(e?.message || e);
+      if (/ENOENT|does not exist|not found/i.test(msg)) return null;
       throw e;
     }
   }
@@ -58,10 +65,14 @@ async function readText(path) {
 
 export async function writeImage(name, blob) {
   if (isNative) {
-    const dir = name.split("/").slice(0, -1).join("/");
-    await fsMkdir(dir ? `images/${dir}` : "images");
     const b64 = await blobToBase64(blob);
-    await Filesystem.writeFile({ path: `${ROOT}/images/${name}`, data: b64, directory: APP_DIR, encoding: "base64" });
+    await Filesystem.writeFile({
+      path: `${ROOT}/images/${name}`,
+      data: b64,
+      directory: APP_DIR,
+      encoding: "base64",
+      recursive: true,
+    });
   } else {
     memBlobs.set(name, blob);
   }
@@ -105,6 +116,8 @@ export async function getJob(id) {
 export async function loadAllJobs() {
   if (!isNative) return [];
   try {
+    // 先确保 jobs 目录存在，避免首次启动时 readdir 报错
+    await fsMkdir("jobs");
     const entries = await Filesystem.readdir({ path: `${ROOT}/jobs`, directory: APP_DIR });
     const files = Array.isArray(entries) ? entries : (entries.files || []);
     const jobs = [];
