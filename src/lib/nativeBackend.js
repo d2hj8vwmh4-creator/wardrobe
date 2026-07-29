@@ -184,6 +184,13 @@ async function resolveAssetUrl(assetUrl) {
   if (!assetUrl) return null;
   return store.getImageUrl(assetToName(assetUrl));
 }
+
+// 原生模式：把虚拟资源路径（/api/import/assets/...）解析为可通过 <img> 加载的 objectURL。
+// Web 模式由后端直接服务该路径，无需解析。
+export async function resolveAsset(assetUrl) {
+  if (!assetUrl || !assetUrl.startsWith(ASSET_PREFIX)) return assetUrl;
+  return store.getImageUrl(assetToName(assetUrl));
+}
 async function publicJob(job) {
   const copy = structuredClone(job);
   delete copy.internal;

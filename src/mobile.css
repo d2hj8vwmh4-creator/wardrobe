@@ -120,57 +120,6 @@
   font-weight: 600;
 }
 
-/* 穿搭视频模块 */
-.m-video-card {
-  position: relative;
-  margin: 0 16px;
-  height: 180px;
-  border-radius: 12px;
-  background: var(--m-video);
-  overflow: hidden;
-}
-.m-play {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 56px;
-  height: 56px;
-  border-radius: 28px;
-  border: 0;
-  background: var(--m-primary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.m-play::after {
-  content: "";
-  width: 0;
-  height: 0;
-  margin-left: 3px;
-  border-left: 16px solid #fff;
-  border-top: 10px solid transparent;
-  border-bottom: 10px solid transparent;
-}
-.m-video-title {
-  position: absolute;
-  left: 16px;
-  bottom: 14px;
-  color: #fff;
-  font-size: 13px;
-}
-.m-duration {
-  position: absolute;
-  right: 12px;
-  top: 12px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
-  font-size: 11px;
-}
-
 /* 单品网格 */
 .m-grid {
   display: grid;

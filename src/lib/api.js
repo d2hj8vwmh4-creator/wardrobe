@@ -45,6 +45,7 @@ export const appApi = {
   deleteJob: (id) => (isNative ? nb.deleteJob(id) : wSend(`/api/import/jobs/${id}`, "DELETE")),
   listWardrobe: () => (isNative ? nb.listWardrobe() : wGet("/api/import/wardrobe")),
   deleteWardrobeItem: (id) => (isNative ? nb.deleteWardrobeItem(id) : wSend(`/api/import/wardrobe/${id}`, "DELETE")),
+  resolveAsset: (assetUrl) => (isNative ? nb.resolveAsset(assetUrl) : assetUrl),
   createOutfit: (params, prompt) =>
     (isNative ? nb.createOutfit(params, prompt) : wSend("/api/import/outfit", "POST", { garmentAssetUrls: params, prompt: prompt || undefined })),
 };

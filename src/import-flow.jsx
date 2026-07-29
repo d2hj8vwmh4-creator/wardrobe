@@ -212,7 +212,9 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
         const metadata = { ...draft, secondaryColor: draft.secondaryColor || null, tags: draft.tags.split(",").map((tag) => tag.trim()).filter(Boolean) };
         await appApi.patchMetadata(job.id, metadata);
         const updated = await appApi.stageAction(job.id, "garment", "approve");
-        const garmentAssetUrl = isNative ? updated.stages.garment.assetUrl : `/api/import/library/import-${job.id}-garment.png`;
+        const garmentAssetUrl = isNative
+          ? await appApi.resolveAsset(updated.stages.garment.assetUrl)
+          : `/api/import/library/import-${job.id}-garment.png`;
         onGarmentApproved?.({ id: `import-${job.id}`, ...metadata, image: garmentAssetUrl, thumbnail: garmentAssetUrl, modeledImage: null, palette: [metadata.color, metadata.secondaryColor].filter(Boolean), importJobId: job.id });
         setJobs((current) => current.map((item) => item.id === job.id ? updated : item));
       } else if (stage === "garment" && action === "generate-modeled") {
@@ -230,7 +232,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
           if (!remainingJobs.length) setOpen(false);
         }
         if (action === "regenerate") setRegenerationPrompts((current) => ({ ...current, [`${job.id}:${stage}`]: "" }));
-        if (stage === "modeled" && action === "approve") onModeledApproved?.(job.id, isNative ? updated.stages.modeled.assetUrl : `/api/import/library/import-${job.id}-modeled.png`);
+        if (stage === "modeled" && action === "approve") onModeledApproved?.(job.id, isNative ? await appApi.resolveAsset(updated.stages.modeled.assetUrl) : `/api/import/library/import-${job.id}-modeled.png`);
       }
     } catch (requestError) { setError(requestError.message); }
     finally { setBusyId(null); }
@@ -273,7 +275,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
 
   return (
     <>
-      <input ref={inputRef} type="file" accept="image/*" multiple hidden disabled={!setup?.ready} onChange={(event) => { submitFiles(event.target.files); event.target.value = ""; }} />
+      <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { submitFiles(event.target.files); event.target.value = ""; }} />
       <div className="import-drop-overlay" data-active={dragging && !setupRequired} aria-hidden={!dragging || setupRequired}><div className="import-drop-target is-over"><UploadSimple size={34} weight="light" /><h2>拖入衣物图片</h2><p>单件单品或整套穿搭照片均可。你的衣橱将保持在原处不被改动。</p></div></div>
       <aside className={`import-tray${hasImportActivity ? " is-expanded" : ""}`} aria-label="衣橱导入">
         <button className="import-tray__button" type="button" onClick={() => setupRequired || hasImportActivity ? setOpen(true) : inputRef.current?.click()} aria-label={setupRequired ? "打开设置说明" : hasImportActivity ? "打开导入进度" : "添加衣物"}>{activeStatus?.tone === "processing" ? <SpinnerGap size={19} className="import-spinner" /> : activeStatus?.tone === "error" ? <WarningCircle size={19} /> : readyCount ? <span>{readyCount}</span> : notice ? <X size={18} /> : <Plus size={19} />}</button>
