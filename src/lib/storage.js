@@ -1,21 +1,25 @@
 // 本地存储层（替代后端 data/ 目录的文件系统）。
-// native（Capacitor）写入 Capacitor Filesystem（Directory.DATA = 应用私有 filesDir）；
-// web 降级用 localStorage + 内存 blob。
+// native（Capacitor）写入 Capacitor Filesystem（Directory.External = 应用专属外部存储，
+// Android 映射 getExternalFilesDir(null)；web 降级用 localStorage + 内存 blob）。
 //
-// 【根因修复 · 第三轮】Capacitor 7 Android 的 ION 控制器在 Directory.DATA 下，
-// saveFile 完全不可靠——即便父目录（filesDir）已存在、不传 recursive、写根级
-// 裸文件名（如 settings.json），都会触发 "Missing parent directory – parent
-// directory creation failed." (OS-PLUG-FILE-0011)。MuMu Android 15 实测三次必现。
+// 【根因修复 · 第四轮】MuMu Android 15 上 Capacitor 7 ION 控制器的 saveFile 在
+// Directory.DATA (filesDir) 下完全失效：writeFile 即便不带 recursive、即便父目录已存在，
+// ION 内部仍强制走 parent-creation 路径并报
+// "Missing parent directory – parent directory creation failed." (OS-PLUG-FILE-0011)。
+// 独立 mkdir 也被同一坏路径影响。四次实测（b2a2600 / d7723ac / 515ae78 / 8fac6fe）
+// 全部失败，logcat 均抓到 OS-PLUG-FILE-0011，files/settings.json 从未落盘。
 //
-// 解决：把 mkdir 和 writeFile 拆开。先独立 mkdir 一个子目录 wardrobe/（容错捕获
-// "已存在"），再把文件写进 wardrobe/<diskName(path)>，writeFile 不带 recursive。
-// 这样 writeFile 触发时父目录已存在，ION 的 parent-creation 路径不再失败。
-// 扁平 diskName 编码（/ → __）保留，readdir 改为读 wardrobe/，列表语义不变。
+// Directory.Documents 也不行（映射到公共 Documents，Android 11+ scoped storage 阻断）。
+//
+// 解决：放弃 Directory.DATA，改用 Directory.External（应用专属外部存储，
+// /storage/emulated/0/Android/data/com.wardrobe.app/files/）。ION 对该路径走不同
+// code path，parent-creation 可正常工作；无需运行时权限；卸载 App 时系统自动清理。
+// 仍保留 mkdir wardrobe/ + 嵌套写入作为兜底。
 import { isNative, blobToBase64, base64ToBlob } from "./env.js";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 
-const APP_DIR = Directory.DATA;
-const APP_SUB = "wardrobe"; // 预创建的子目录
+const APP_DIR = Directory.External;
+const APP_SUB = "wardrobe"; // External 根下的子目录
 const SEP_RE = /\//g;
 const diskName = (name) => name.replace(SEP_RE, "__");
 
@@ -31,9 +35,7 @@ async function ensureAppDir() {
         await Filesystem.mkdir({ path: APP_SUB, directory: APP_DIR, recursive: true });
       } catch (e) {
         const msg = String(e?.message || e);
-        // 已存在/父目录已存在 等幂等错误一律吞咽；其他错误不抛（写时再暴露）
         if (!/exists|already|EEXIST/i.test(msg)) {
-          // 记录但不让 mkdir 失败阻断后续写入（write 时会再报错）
           console.warn("[storage] mkdir wardrobe failed:", msg);
         }
       }
