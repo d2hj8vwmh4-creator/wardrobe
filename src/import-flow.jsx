@@ -21,6 +21,30 @@ const fileToDataUrl = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+// Android WebView 选图常见 file.type===""，FileReader 会产出
+// "data:application/octet-stream;base64,..."——部分视觉 API（如 DashScope）会拒收
+// 非 image/* 的 data URL。按文件魔数嗅探真实图片类型并纠正 data URL 前缀。
+function sniffImageMime(bytes) {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) return "image/png";        // ‰P
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";       // ÿØ
+  if (bytes[0] === 0x47 && bytes[1] === 0x49) return "image/gif";        // GI
+  if (bytes[0] === 0x42 && bytes[1] === 0x4d) return "image/bmp";        // BM
+  if (bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42) return "image/webp"; // RIFF....WEBP
+  return null;
+}
+
+async function fileToImageDataUrl(file) {
+  const dataUrl = await fileToDataUrl(file);
+  if (dataUrl.startsWith("data:image/")) return dataUrl;
+  try {
+    const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    const mime = sniffImageMime(head) || "image/png";
+    return dataUrl.replace(/^data:[^;]*;/, `data:${mime};`);
+  } catch {
+    return dataUrl.replace(/^data:[^;]*;/, "data:image/png;");
+  }
+}
+
 // Android WebView 的 <input type="file"> 返回的 File 经常是空 MIME（file.type === ""），
 // 若直接用 file.type.startsWith("image/") 判断，合法图片会被误判为「非图片」并被静默丢弃，
 // 表现为「导入照片失败」却没有任何报错、也不发任何网络请求。这里按扩展名兜底，并信任
@@ -214,7 +238,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     setDragging(false); setError(""); setNotice(null);
     for (const file of images) {
       try {
-        const imageDataUrl = await fileToDataUrl(file);
+        const imageDataUrl = await fileToImageDataUrl(file);
         const result = await appApi.createJobs(imageDataUrl, { name: file.name.replace(/\.[^.]+$/, "") });
         const createdJobs = result.jobs || [result];
         if (!createdJobs.length && result.noClothingDetected) {
