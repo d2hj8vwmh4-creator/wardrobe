@@ -78,6 +78,14 @@ async function readText(path) {
   return v ? JSON.parse(v) : [];
 }
 
+// 【根因修复 · 第五轮】Capacitor Filesystem 的 Encoding 枚举只有 utf8/ascii/utf16，
+// "base64" 是非法值！读写二进制的正确用法是【省略 encoding】——省略时 data 才按 base64 处理。
+// 传 encoding:"base64" 时 Android 端把它当文本字符集：
+//   - readFile 返回的是原始二进制字符（"�PNG..."）而非 base64，JS 侧 atob() 抛
+//     InvalidCharacterError → getReferenceBlob() 失败 → hasModelReference=false → 永远「需要设置」；
+//   - writeFile 会把 base64 字符串按文本原样写盘 → 保存的 PNG 全部损坏。
+// 已在 MuMu 上通过 CDP 实测确认：带 encoding:"base64" 读出 2126 个乱码字符，
+// 省略 encoding 读出 2840 字符的合法 base64（iVBORw0KGgo...）。
 export async function writeImage(name, blob) {
   if (isNative) {
     const b64 = await blobToBase64(blob);
@@ -86,7 +94,7 @@ export async function writeImage(name, blob) {
       path: `${APP_SUB}/${diskName(name)}`,
       data: b64,
       directory: APP_DIR,
-      encoding: "base64",
+      // 不传 encoding：data 按 base64 解码成二进制写入
     });
   } else {
     memBlobs.set(name, blob);
@@ -98,7 +106,7 @@ export async function readImageBlob(name) {
     const r = await Filesystem.readFile({
       path: `${APP_SUB}/${diskName(name)}`,
       directory: APP_DIR,
-      encoding: "base64",
+      // 不传 encoding：返回 base64 字符串
     });
     return base64ToBlob(r.data, "image/png");
   }
