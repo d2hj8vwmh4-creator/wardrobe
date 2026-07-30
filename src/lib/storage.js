@@ -46,7 +46,7 @@ async function ensureAppDir() {
 
 async function writeText(path, value) {
   const text = JSON.stringify(value, null, 2);
-  if (isNative) {
+  if (isNative()) {
     await ensureAppDir();
     await Filesystem.writeFile({
       path: `${APP_SUB}/${diskName(path)}`,
@@ -60,7 +60,7 @@ async function writeText(path, value) {
 }
 
 async function readText(path) {
-  if (isNative) {
+  if (isNative()) {
     try {
       const r = await Filesystem.readFile({
         path: `${APP_SUB}/${diskName(path)}`,
@@ -87,7 +87,7 @@ async function readText(path) {
 // 已在 MuMu 上通过 CDP 实测确认：带 encoding:"base64" 读出 2126 个乱码字符，
 // 省略 encoding 读出 2840 字符的合法 base64（iVBORw0KGgo...）。
 export async function writeImage(name, blob) {
-  if (isNative) {
+  if (isNative()) {
     const b64 = await blobToBase64(blob);
     await ensureAppDir();
     await Filesystem.writeFile({
@@ -102,7 +102,7 @@ export async function writeImage(name, blob) {
 }
 
 export async function readImageBlob(name) {
-  if (isNative) {
+  if (isNative()) {
     const r = await Filesystem.readFile({
       path: `${APP_SUB}/${diskName(name)}`,
       directory: APP_DIR,
@@ -116,7 +116,7 @@ export async function readImageBlob(name) {
 }
 
 export async function deleteImage(name) {
-  if (isNative) {
+  if (isNative()) {
     try {
       await Filesystem.deleteFile({
         path: `${APP_SUB}/${diskName(name)}`,
@@ -145,7 +145,7 @@ export async function getJob(id) {
 }
 
 export async function loadAllJobs() {
-  if (!isNative) return [];
+  if (!isNative()) return [];
   try {
     await ensureAppDir();
     const entries = await Filesystem.readdir({ path: APP_SUB, directory: APP_DIR });
@@ -168,7 +168,7 @@ export async function loadAllJobs() {
 }
 
 export async function deleteJobDir(id) {
-  if (!isNative) {
+  if (!isNative()) {
     for (const key of [...memBlobs.keys()]) {
       if (key.startsWith(`${id}/`) || key === id) memBlobs.delete(key);
     }

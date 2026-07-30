@@ -1,9 +1,15 @@
 import { Capacitor } from "@capacitor/core";
 
 // 是否在 Capacitor 原生外壳（Android/iOS）内运行。
-// native = true 时，前端直接走原生桥（CapacitorHttp 绕过 CORS + Filesystem 本地存储）；
-// native = false 时，保持原有 /api/* 后端调用，Web 功能零改动。
-export const isNative = Capacitor.isNativePlatform();
+// 注意：必须写成「调用时实时检测」的函数，绝不能做成模块加载时一次性
+// 求值的 const。原因：env.js 在 bundle 解析阶段就会执行；若该时刻 Capacitor
+// 桥（window.Capacitor.platform）尚未注入完成，isNativePlatform() 会返回
+// false 并被冻结，导致后续 startImport / appApi 全部走错的 Web 分支
+//（<input type=file> 在 Android WebView 下 files 恒为空 → 「未能从所选文件中
+// 读取到图片」）。改为函数后，每次调用都重新读取当前真实状态。
+export function isNative() {
+  return Capacitor.isNativePlatform();
+}
 
 // 与后端 import-job-api.mjs 默认值对齐，保证首次进入 App 即可用（默认服务商 qwen / 通义千问）。
 export const DEFAULT_SETTINGS = {

@@ -720,7 +720,7 @@ export function App() {
   const generateOutfit = useCallback(async () => {
     if (selectedOutfitIds.length < 1) return;
     const chosen = items.filter((item) => selectedOutfitIds.includes(item.id));
-    const params = isNative ? chosen.map((item) => item.id) : chosen.map((item) => item.image);
+    const params = isNative() ? chosen.map((item) => item.id) : chosen.map((item) => item.image);
     setOutfitLoading(true);
     setOutfitError("");
     setOutfitResult(null);

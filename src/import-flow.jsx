@@ -341,7 +341,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
 
   // 统一导入入口：原生走系统相册，Web 走 <input type="file">
   const startImport = useCallback(() => {
-    if (isNative) pickNativeImages();
+    if (isNative()) pickNativeImages();
     else inputRef.current?.click();
   }, [pickNativeImages]);
 
@@ -364,7 +364,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
         const metadata = { ...draft, secondaryColor: draft.secondaryColor || null, tags: draft.tags.split(",").map((tag) => tag.trim()).filter(Boolean) };
         await appApi.patchMetadata(job.id, metadata);
         const updated = await appApi.stageAction(job.id, "garment", "approve");
-        const garmentAssetUrl = isNative
+        const garmentAssetUrl = isNative()
           ? await appApi.resolveAsset(updated.stages.garment.assetUrl)
           : `/api/import/library/import-${job.id}-garment.png`;
         onGarmentApproved?.({ id: `import-${job.id}`, ...metadata, image: garmentAssetUrl, thumbnail: garmentAssetUrl, modeledImage: null, palette: [metadata.color, metadata.secondaryColor].filter(Boolean), importJobId: job.id });
@@ -384,7 +384,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
           if (!remainingJobs.length) setOpen(false);
         }
         if (action === "regenerate") setRegenerationPrompts((current) => ({ ...current, [`${job.id}:${stage}`]: "" }));
-        if (stage === "modeled" && action === "approve") onModeledApproved?.(job.id, isNative ? await appApi.resolveAsset(updated.stages.modeled.assetUrl) : `/api/import/library/import-${job.id}-modeled.png`);
+        if (stage === "modeled" && action === "approve") onModeledApproved?.(job.id, isNative() ? await appApi.resolveAsset(updated.stages.modeled.assetUrl) : `/api/import/library/import-${job.id}-modeled.png`);
       }
     } catch (requestError) { setError(requestError.message); }
     finally { setBusyId(null); }
