@@ -46,6 +46,22 @@ async function fileToImageDataUrl(file) {
   }
 }
 
+// 把 Capacitor Camera.pickImages 返回的 GalleryPhoto 转成 dataUrl。
+// pickImages 在 resultType:"base64" 时返回 base64String；极少数情况下若只返回 webPath，
+// 则通过 fetch(webPath) 取字节兜底，避免 Import 因缺少 base64 而静默失败。
+async function photoToDataUrl(photo) {
+  if (photo.base64String) {
+    const mime = (photo.format && String(photo.format).startsWith("image/")) ? photo.format : "image/jpeg";
+    return `data:${mime};base64,${photo.base64String}`;
+  }
+  if (photo.webPath) {
+    const res = await fetch(photo.webPath);
+    const blob = await res.blob();
+    return await fileToDataUrl(blob);
+  }
+  throw new Error("系统相册返回的图片既无 base64 也无 webPath，无法读取");
+}
+
 // Android WebView 的 <input type="file"> 在不同 ROM/系统选择器下 file.type 可能为空串、
 // "application/octet-stream"、或正常的 "image/jpeg"——任何只看 MIME 的判断都不稳。
 // 改为按文件首字节（魔数）嗅探：PNG / JPEG / GIF / BMP / WEBP 放行，其它一律拒。
@@ -300,7 +316,8 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     if (!live?.ready) { setOpen(true); return; }
     let photos;
     try {
-      const res = await Camera.pickImages({ quality: 90, limit: 5, readData: true });
+      // resultType:"base64" 让原生直接返回图片字节（data URL 前缀由 photoToDataUrl 拼）。
+      const res = await Camera.pickImages({ quality: 90, limit: 5, resultType: "base64" });
       photos = res.photos;
     } catch (requestError) {
       const msg = String(requestError?.message || requestError || "");
@@ -314,12 +331,9 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     setDragging(false); setError(""); setNotice(null);
     for (const photo of photos) {
       try {
-        const b64 = photo.base64String;
-        if (!b64) { setError("系统相册返回的图片为空，请换一张再试。"); setOpen(true); continue; }
-        const mime = (photo.format && photo.format.startsWith("image/")) ? photo.format : "image/jpeg";
-        const imageDataUrl = `data:${mime};base64,${b64}`;
+        const imageDataUrl = await photoToDataUrl(photo);
         const name = (photo.path && photo.path.split("/").pop().replace(/\.[^.]+$/, "")) || "导入单品";
-        console.log("[import] native pick", { mime, name, b64Len: b64.length });
+        console.log("[import] native pick", { format: photo.format, name, b64Len: (photo.base64String || "").length });
         await processImage(imageDataUrl, name);
       } catch (requestError) { setError(requestError.message); }
     }
