@@ -679,6 +679,16 @@ export function App() {
     persistEdit(updatedItem);
   };
 
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
+
+  const requestDeleteItem = (id) => {
+    setPendingDeleteId(id);
+  };
+
+  const cancelDeleteItem = () => {
+    setPendingDeleteId(null);
+  };
+
   const deleteItem = async (id) => {
     if (id.startsWith("import-")) {
       try {
@@ -985,7 +995,20 @@ export function App() {
             </div>
           )}
 
-          {selectedItem && !outfitMode && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} />}
+          {selectedItem && !outfitMode && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={requestDeleteItem} />}
+
+          {pendingDeleteId && (
+            <div className="confirm-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirm-delete-title">
+              <div className="confirm-dialog">
+                <h3 id="confirm-delete-title">删除此单品？</h3>
+                <p>该操作不可撤销，单品将从衣橱移除。</p>
+                <div className="confirm-dialog__actions">
+                  <button type="button" className="secondary-button" onClick={cancelDeleteItem}>取消</button>
+                  <button type="button" className="danger-button" onClick={async () => { const id = pendingDeleteId; setPendingDeleteId(null); await deleteItem(id); }}>确认删除</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {outfitMode && selectedOutfitIds.length > 0 && (
             <div className="outfit-bar" role="region" aria-label="搭配生成">
