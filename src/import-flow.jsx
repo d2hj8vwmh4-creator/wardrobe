@@ -230,6 +230,11 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(null);
   const [setup, setSetup] = useState(null);
+  // 用户已选图但 AI 还没创建出 job 的中间态。用于在 dialog 中显示"正在准备 N 张图片..."
+  // 而不是停在「选择或粘贴图片」空状态，避免用户以为没选上而重复点击。
+  const [pendingPhotoCount, setPendingPhotoCount] = useState(0);
+  // 记录"有 review 就绪但用户还没看过"的 job id 集合，用来在 job 进入 review 时自动打开 dialog。
+  const seenReviewIdsRef = useRef(new Set());
 
   useEffect(() => {
     appApi.config().then(setSetup).catch((requestError) => setSetup({ ready: false, error: requestError.message }));
@@ -256,6 +261,16 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     return () => clearInterval(timer);
   }, [jobs, refresh]);
 
+  // job 进入「待审核」（任意 stage status === "review"）时，自动打开 dialog。
+  // 解决用户历史反馈：选完图、关闭 dialog 后右下角才有审核提示——现在审核就绪
+  // dialog 会主动浮现，避免用户不知道下一步操作在哪。
+  useEffect(() => {
+    const readyNow = jobs.filter((job) => reviewStageFor(job) && !seenReviewIdsRef.current.has(job.id));
+    if (readyNow.length === 0) return;
+    readyNow.forEach((job) => seenReviewIdsRef.current.add(job.id));
+    setOpen(true);
+  }, [jobs]);
+
   // 始终实时校验设置就绪状态，避免「保存设置后未重启 App」导致 setup 仍为旧的 ready:false，
   // 从而把导入错误地拦截在 setup 守卫处（并弹出误导性的「请在 .env 中添加密钥」提示）。
   const ensureSetup = useCallback(async () => {
@@ -271,16 +286,22 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
   }, []);
 
   // 核心：把一张已就绪的图片（dataUrl）送去 AI 建单品。Web 与原生共用。
+  // 注意：调用方负责维护 pendingPhotoCount（递增由 pickNativeImages/submitFiles 在调用前完成，
+  // 递减由这里统一收尾，确保每张图都恰好 +1/-1 配对，绝不泄漏到下一轮）。
   const processImage = useCallback(async (imageDataUrl, name) => {
-    const result = await appApi.createJobs(imageDataUrl, { name: name || "导入单品" });
-    const createdJobs = result.jobs || [result];
-    if (!createdJobs.length && result.noClothingDetected) {
-      setNotice({ tone: "complete", text: "未检测到衣物", detail: `我们在 ${name} 中未能找到明确的穿戴单品。请尝试更清晰或取景更紧凑的图片。` });
-      setOpen(true);
-      return;
+    try {
+      const result = await appApi.createJobs(imageDataUrl, { name: name || "导入单品" });
+      const createdJobs = result.jobs || [result];
+      if (!createdJobs.length && result.noClothingDetected) {
+        setNotice({ tone: "complete", text: "未检测到衣物", detail: `我们在 ${name} 中未能找到明确的穿戴单品。请尝试更清晰或取景更紧凑的图片。` });
+        setOpen(true);
+        return;
+      }
+      setJobs((current) => [...current, ...createdJobs]);
+      setDrafts((current) => ({ ...current, ...Object.fromEntries(createdJobs.map((job) => [job.id, defaultDraft(job)])) }));
+    } finally {
+      setPendingPhotoCount((current) => Math.max(0, current - 1));
     }
-    setJobs((current) => [...current, ...createdJobs]);
-    setDrafts((current) => ({ ...current, ...Object.fromEntries(createdJobs.map((job) => [job.id, defaultDraft(job)])) }));
   }, []);
 
   // Web 端：<input type="file"> 返回的 File/Blob 可能是 content:// 托管、size 未知、
@@ -299,6 +320,8 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
       return;
     }
     setDragging(false); setError(""); setNotice(null);
+    setOpen(true);
+    setPendingPhotoCount((current) => current + images.length);
     for (const file of images) {
       try {
         const imageDataUrl = await fileToImageDataUrl(file);
@@ -329,6 +352,8 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
     }
     if (!photos || !photos.length) return;
     setDragging(false); setError(""); setNotice(null);
+    setOpen(true);
+    setPendingPhotoCount((current) => current + photos.length);
     for (const photo of photos) {
       try {
         const imageDataUrl = await photoToDataUrl(photo);
@@ -423,25 +448,43 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, trigg
   const reviewJob = selectedReviewJob || jobs.find((job) => reviewStageFor(job)) || jobs.find((job) => hasCleanupFailure(job)) || active;
   const reviewStage = reviewJob ? reviewStageFor(reviewJob) : null;
   const progress = 0;
-  const hasImportActivity = Boolean(jobs.length || notice || setupRequired);
+  const hasImportActivity = Boolean(jobs.length || notice || setupRequired || pendingPhotoCount > 0);
+  // dialog 标题四态：审核就绪 > 处理中 > 等待 AI 响应 > 空/通知
+  const dialogTitleText = readyCount > 0
+    ? `${readyCount} 个待审核`
+    : pendingPhotoCount > 0
+      ? `正在准备 ${pendingPhotoCount} 张图片…`
+      : activeStatus?.tone === "error"
+        ? "导入需要关注"
+        : jobs.length > 0
+          ? activeStatus?.text || "正在处理"
+          : notice?.text || "添加到你的衣橱";
 
   return (
     <>
       <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { submitFiles(event.target.files); event.target.value = ""; }} />
       <div className="import-drop-overlay" data-active={dragging && !setupRequired} aria-hidden={!dragging || setupRequired}><div className="import-drop-target is-over"><UploadSimple size={34} weight="light" /><h2>拖入衣物图片</h2><p>单件单品或整套穿搭照片均可。你的衣橱将保持在原处不被改动。</p></div></div>
       <aside className={`import-tray${hasImportActivity ? " is-expanded" : ""}`} aria-label="衣橱导入">
-        <button className="import-tray__button" type="button" onClick={async () => { const live = await ensureSetup(); if (!live?.ready || hasImportActivity) setOpen(true); else startImport(); }} aria-label={setupRequired ? "打开设置说明" : hasImportActivity ? "打开导入进度" : "添加衣物"}>{activeStatus?.tone === "processing" ? <SpinnerGap size={19} className="import-spinner" /> : activeStatus?.tone === "error" ? <WarningCircle size={19} /> : readyCount ? <span>{readyCount}</span> : notice ? <X size={18} /> : <Plus size={19} />}</button>
-        <div className="import-tray__actions">{active && <img className="import-tray__preview" src={active.stages?.garment?.assetUrl || active.stages?.garment?.failedAssetUrl || active.stages?.crop?.assetUrl || active.originalAssetUrl} alt="" />}<span className="import-tray__label">{activeStatus?.text || "添加衣物"}</span>{!setupRequired && <button className="import-icon-button" type="button" onClick={() => startImport()} aria-label="选择图片"><UploadSimple size={17} /></button>}</div>
+        <button className="import-tray__button" type="button" onClick={async () => { const live = await ensureSetup(); if (!live?.ready) { setOpen(true); return; } setOpen(true); }} aria-label={setupRequired ? "打开设置说明" : "打开导入进度"}>{pendingPhotoCount > 0 || activeStatus?.tone === "processing" ? <SpinnerGap size={19} className="import-spinner" /> : activeStatus?.tone === "error" ? <WarningCircle size={19} /> : readyCount ? <span>{readyCount}</span> : notice ? <X size={18} /> : <Plus size={19} />}</button>
+        <div className="import-tray__actions">{active && <img className="import-tray__preview" src={active.stages?.garment?.assetUrl || active.stages?.garment?.failedAssetUrl || active.stages?.crop?.assetUrl || active.originalAssetUrl} alt="" />}<span className="import-tray__label">{pendingPhotoCount > 0 ? `正在准备 ${pendingPhotoCount} 张图片…` : activeStatus?.text || "添加衣物"}</span></div>
       </aside>
       <div className="import-popover-backdrop" data-open={open} onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
         <section className="import-popover" role="dialog" aria-modal="true" aria-labelledby="import-title">
-          <header className="import-popover__header"><div><p className="import-popover__eyebrow">衣橱导入</p><h2 className="import-popover__title" id="import-title">{readyCount ? `${readyCount} 个待审核` : activeStatus?.tone === "error" ? "导入需要关注" : jobs.length ? "正在准备新单品" : notice?.text || "添加到你的衣橱"}</h2></div><button className="import-icon-button" type="button" onClick={() => setOpen(false)} aria-label="关闭导入进度"><X size={20} /></button></header>
-          {!jobs.length ? setupRequired ? <div className="import-drop-target import-setup-warning"><WarningCircle size={30} /><h2>需要设置</h2>{setup.hasApiKey ? <p>请在 <code>{setup.modelReference || "data/model-reference.png"}</code> 放置一张你本人的 PNG 参考照片，刷新页面后即可开始导入。</p> : <p>请在 <code>.env</code> 中添加你的 API 密钥{!setup.hasModelReference && <>，并在 <code>{setup.modelReference || "data/model-reference.png"}</code> 放置一张你本人的 PNG 参考照片</>}，然后重启应用。</p>}</div> : <div className="import-drop-target"><UploadSimple size={28} /><h2>{notice ? "换一张图片试试" : "选择或粘贴图片"}</h2><p>{notice?.detail || "我们会提取每件衣物，建议其细节，并等待你确认后再保存。"}</p><button className="import-button import-button--primary" disabled={!setup?.ready} onClick={() => { setNotice(null); startImport(); }}>选择图片</button></div> : (
+          <header className="import-popover__header"><div><p className="import-popover__eyebrow">衣橱导入</p><h2 className="import-popover__title" id="import-title">{dialogTitleText}</h2></div><button className="import-icon-button" type="button" onClick={() => setOpen(false)} aria-label="关闭导入进度"><X size={20} /></button></header>
+          {pendingPhotoCount > 0 && jobs.length === 0 ? (
+            // 选图瞬间但 AI 还没建出 job 的中间态：给用户明确反馈"我们收到了，正在准备"，
+            // 避免空 dialog + 同一个"选择图片"按钮让用户以为没选上而重复点击。
+            <div className="import-drop-target import-pending" role="status" aria-live="polite">
+              <SpinnerGap size={32} className="import-spinner" />
+              <h2>正在准备 {pendingPhotoCount} 张图片…</h2>
+              <p>我们将逐张送入 AI 识别衣物。识别完成后会立即在此出现审核卡片。</p>
+            </div>
+          ) : !jobs.length ? setupRequired ? <div className="import-drop-target import-setup-warning"><WarningCircle size={30} /><h2>需要设置</h2>{setup.hasApiKey ? <p>请在 <code>{setup.modelReference || "data/model-reference.png"}</code> 放置一张你本人的 PNG 参考照片，刷新页面后即可开始导入。</p> : <p>请在 <code>.env</code> 中添加你的 API 密钥{!setup.hasModelReference && <>，并在 <code>{setup.modelReference || "data/model-reference.png"}</code> 放置一张你本人的 PNG 参考照片</>}，然后重启应用。</p>}</div> : <div className="import-drop-target"><UploadSimple size={28} /><h2>{notice ? "换一张图片试试" : "选择或粘贴图片"}</h2><p>{notice?.detail || "我们会提取每件衣物，建议其细节，并等待你确认后再保存。"}</p><button className="import-button import-button--primary" disabled={!setup?.ready || pendingPhotoCount > 0} onClick={() => { setNotice(null); startImport(); }}>{pendingPhotoCount > 0 ? "准备中…" : "选择图片"}</button></div> : (
             <>
-              <div className={`import-progress${activeStatus?.tone !== "processing" ? " is-reviewing" : progress < 100 ? " is-indeterminate" : ""}`}><div className="import-progress__meta"><span>{activeStatus?.text}</span><span>{jobs.length} 件</span></div>{activeStatus?.tone === "processing" && <div className="import-progress__track"><div className="import-progress__bar" style={{ "--import-progress": `${progress}%` }} /></div>}</div>
+              <div className={`import-progress${activeStatus?.tone !== "processing" ? " is-reviewing" : progress < 100 ? " is-indeterminate" : ""}`}><div className="import-progress__meta"><span>{pendingPhotoCount > 0 ? `正在准备 ${pendingPhotoCount} 张图片…` : activeStatus?.text}</span><span>{jobs.length} 件</span></div>{activeStatus?.tone === "processing" && <div className="import-progress__track"><div className="import-progress__bar" style={{ "--import-progress": `${progress}%` }} /></div>}</div>
               {reviewJob && reviewStage ? <ReviewEditor job={reviewJob} stage={reviewStage} draft={drafts[reviewJob.id] || defaultDraft(reviewJob)} setDraft={(draft) => setDrafts((current) => ({ ...current, [reviewJob.id]: draft }))} regenPrompt={regenerationPrompts[`${reviewJob.id}:${reviewStage}`] || ""} setRegenPrompt={(prompt) => setRegenerationPrompts((current) => ({ ...current, [`${reviewJob.id}:${reviewStage}`]: prompt }))} busy={busyId === reviewJob.id} onAction={(action, prompt) => perform(reviewJob, reviewStage, action, prompt)} /> : reviewJob && hasCleanupFailure(reviewJob) ? <CleanupEditor job={reviewJob} tolerance={cleanupTolerances[reviewJob.id] ?? reviewJob.stages.garment.cleanupTolerance ?? 46} setTolerance={(tolerance) => setCleanupTolerances((current) => ({ ...current, [reviewJob.id]: tolerance }))} busy={busyId === reviewJob.id} onPreview={(tolerance) => performCleanup(reviewJob, "preview", tolerance)} onAccept={() => performCleanup(reviewJob, "accept")} /> : null}
               <div className="import-card-list">{jobs.map((job) => { const status = deriveStatus(job); const itemName = drafts[job.id]?.name || job.metadata?.name || "新单品"; const failedStage = job.stages?.garment?.status === "failed" ? "garment" : job.stages?.modeled?.status === "failed" ? "modeled" : null; return <article className={`import-card is-${status.tone}${reviewJob?.id === job.id ? " is-selected" : ""}`} key={job.id}><img className="import-card__image" src={job.stages?.garment?.assetUrl || job.stages?.garment?.failedAssetUrl || job.stages?.crop?.assetUrl || job.originalAssetUrl} alt="" /><div className="import-card__body"><h3 className="import-card__title">{itemName}</h3><p className="import-card__detail import-card__detail--status" data-tone={status.tone}>{status.tone === "error" ? status.detail : status.text}</p></div><div className="import-card__actions">{status.tone === "ready" && <button className="import-icon-button" onClick={() => { setSelectedReviewId(job.id); setOpen(true); }} aria-label={`审核 ${itemName}`}><Check size={17} /></button>}{failedStage && <button className="import-button import-card__retry" disabled={busyId === job.id} onClick={() => perform(job, failedStage, "regenerate", "")}><ArrowCounterClockwise size={14} /> 重试</button>}<button className="import-icon-button import-card__delete" disabled={busyId === job.id} onClick={() => deleteJob(job)} aria-label={`从导入队列删除 ${itemName}`}><Trash size={16} /></button></div></article>; })}</div>
-              <div className="import-actions"><button className="import-button" onClick={() => startImport()}><Plus size={14} /> 再添加一件</button></div>
+              <div className="import-actions"><button className="import-button" disabled={pendingPhotoCount > 0} onClick={() => startImport()}><Plus size={14} /> {pendingPhotoCount > 0 ? "准备中…" : "再添加一件"}</button></div>
             </>
           )}
           {error && <p className="import-status is-error" role="alert">{error}</p>}
